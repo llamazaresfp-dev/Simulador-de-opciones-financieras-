@@ -129,7 +129,12 @@ def test_curves_have_no_nan(changes):
 def test_engine_imports_without_streamlit():
     # Intérprete nuevo: no depende de lo que pytest ya tenga cargado.
     subprocess.run(
-        [sys.executable, "-c", "import opciones, sys; assert 'streamlit' not in sys.modules"],
+        [
+            sys.executable,
+            "-c",
+            "import opciones, opciones.implied_vol, opciones.simulation, sys; "
+            "assert 'streamlit' not in sys.modules",
+        ],
         check=True,
         cwd=REPO_ROOT,
     )

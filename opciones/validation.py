@@ -7,12 +7,16 @@ Las funciones devuelven listas de mensajes en español:
   datos son válidos y se puede llamar a analyze().
 - market_warnings: AVISOS informativos. No impiden calcular; solo
   ayudan a interpretar los resultados.
+- validate_simulation / scenario_warnings (Etapa A): lo mismo para los
+  escenarios de Monte Carlo.
 
 Nunca lanzan excepciones: con datos raros (None, texto, NaN...)
 simplemente devuelven un mensaje de error.
 """
 
 import math
+
+import numpy as np
 
 from opciones.models import MIN_VOL
 
@@ -157,4 +161,110 @@ def market_warnings(market) -> list[str]:
         warnings.append(MSG_ZERO_DAYS)
 
     warnings.append(MSG_CLOSE_FEE)
+    return warnings
+
+
+# --- Escenarios de Monte Carlo (Etapa A, decisiones A10 y A11) ---------------
+
+# Rangos de la simulación (decisión A11).
+MIN_PATHS = 1_000
+MAX_PATHS = 1_000_000
+MIN_SEED = 0
+MAX_SEED = 2**32 - 1
+MIN_MU = -0.50  # −50 % anual
+MAX_MU = 1.00  # +100 % anual
+
+MSG_SCENARIO_ZERO_DAYS = (
+    "Escenarios: con 0 días al vencimiento no hay tiempo hasta el vencimiento, "
+    "así que no hay distribución de precios que simular. Usa al menos 1 día."
+)
+MSG_MISSING_SIM = "Faltan los ajustes de la simulación."
+MSG_BAD_PATHS = (
+    "El número de simulaciones debe ser un número entero entre 1 000 y 1 000 000."
+)
+MSG_BAD_SEED = "La semilla debe ser un número entero entre 0 y 4 294 967 295."
+MSG_BAD_MU = (
+    "El crecimiento esperado (μ) debe ser un número entre −50 % y +100 % anual, "
+    "o quedar vacío para usar el escenario neutral al riesgo."
+)
+
+MSG_MODEL = (
+    "Los escenarios son el resultado de un modelo (precio final lognormal), "
+    "no una predicción de lo que hará el mercado."
+)
+MSG_FAT_TAILS = (
+    "Las distribuciones reales tienen colas más gruesas que la lognormal: los "
+    "movimientos extremos son más frecuentes de lo que indica el modelo, así "
+    "que la probabilidad de beneficio y los percentiles 5/95 pueden ser "
+    "optimistas."
+)
+MSG_SCENARIO_AMERICAN = (
+    "Las opciones sobre acciones y ETF son americanas (se pueden ejercer antes "
+    "del vencimiento): la volatilidad implícita y la simulación usan un modelo "
+    "europeo y quedan sesgadas."
+)
+
+
+def _is_integer(value) -> bool:
+    """True si 'value' es un entero de verdad (int de Python o de numpy, no bool)."""
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, np.integer))
+
+
+def validate_simulation(market, legs, sim) -> list[str]:
+    """Errores para calcular los escenarios (lista vacía = válido).
+
+    Reutiliza validate_market y validate_legs (mismos mensajes del MVP) y
+    añade:
+    - días = 0: error solo para escenarios (el MVP sí lo admite).
+    - n_paths: entero entre 1 000 y 1 000 000.
+    - seed: entero entre 0 y 2³² − 1.
+    - mu: None (neutral al riesgo) o número entre −0,50 y +1,00 (fracción anual).
+
+    Nunca lanza excepciones.
+    """
+    errors = validate_market(market) + validate_legs(legs)
+
+    days = getattr(market, "days", None)
+    if _is_number(days) and days == 0:
+        errors.append(MSG_SCENARIO_ZERO_DAYS)
+
+    if sim is None:
+        errors.append(MSG_MISSING_SIM)
+        return errors
+
+    n_paths = getattr(sim, "n_paths", None)
+    if not _is_integer(n_paths) or not MIN_PATHS <= n_paths <= MAX_PATHS:
+        errors.append(MSG_BAD_PATHS)
+
+    seed = getattr(sim, "seed", None)
+    if not _is_integer(seed) or not MIN_SEED <= seed <= MAX_SEED:
+        errors.append(MSG_BAD_SEED)
+
+    mu = getattr(sim, "mu", None)
+    if mu is not None and (not _is_number(mu) or not MIN_MU <= mu <= MAX_MU):
+        errors.append(MSG_BAD_MU)
+
+    return errors
+
+
+def scenario_warnings(market) -> list[str]:
+    """Avisos para mostrar junto a los escenarios (AC-A15).
+
+    - Siempre: es un modelo, no una predicción.
+    - Siempre: las colas reales son más gruesas que la lognormal.
+    - Acción/ETF: las opciones americanas sesgan la IV y la simulación.
+    - Índice: las opciones son europeas.
+    - Siempre: herramienta de estudio, no asesoría (mismo texto del MVP).
+    """
+    warnings = [MSG_MODEL, MSG_FAT_TAILS]
+
+    underlying = getattr(market, "underlying", None)
+    if underlying in ("Acción", "ETF"):
+        warnings.append(MSG_SCENARIO_AMERICAN)
+    elif underlying == "Índice":
+        warnings.append(MSG_EUROPEAN)
+
+    warnings.append(MSG_NOT_ADVICE)
     return warnings

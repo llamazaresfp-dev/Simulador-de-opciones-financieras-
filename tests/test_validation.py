@@ -9,7 +9,17 @@ import math
 
 import pytest
 
-from opciones import MIN_VOL, Leg, Market, market_warnings, validate_legs, validate_market
+from opciones import (
+    MIN_VOL,
+    Leg,
+    Market,
+    SimulationSettings,
+    market_warnings,
+    scenario_warnings,
+    validate_legs,
+    validate_market,
+    validate_simulation,
+)
 
 
 def market(**changes):
@@ -189,3 +199,140 @@ def test_close_commission_note_is_present():
 def test_warnings_do_not_crash_with_invalid_market():
     # La interfaz puede pedir avisos aunque haya errores: no debe fallar.
     assert_spanish_messages(market_warnings(market(days=None, underlying="Bono")))
+
+
+# --- Escenarios: validate_simulation (Etapa A, decisión A11) -----------------
+
+
+def sim(**changes):
+    """Ajustes de simulación válidos por defecto."""
+    data = dict(n_paths=100_000, seed=42, mu=None)
+    data.update(changes)
+    return SimulationSettings(**data)
+
+
+def test_valid_simulation_has_no_errors():
+    assert validate_simulation(market(), [call()], sim()) == []
+
+
+def test_default_simulation_settings_are_valid():
+    assert validate_simulation(market(), [call()], SimulationSettings()) == []
+
+
+@pytest.mark.parametrize("n_paths", [999, 1_000_001, 0, -5, 1.5, 1000.0, "a", None, True, math.nan])
+def test_bad_n_paths_is_error(n_paths):
+    errors = validate_simulation(market(), [call()], sim(n_paths=n_paths))
+    assert_spanish_messages(errors)
+    assert any("simulaciones" in e for e in errors)
+
+
+@pytest.mark.parametrize("n_paths", [1_000, 1_000_000])
+def test_n_paths_limits_are_valid(n_paths):
+    assert validate_simulation(market(), [call()], sim(n_paths=n_paths)) == []
+
+
+@pytest.mark.parametrize("seed", [-1, 2**32, 1.5, "a", None, True, False, math.inf])
+def test_bad_seed_is_error(seed):
+    errors = validate_simulation(market(), [call()], sim(seed=seed))
+    assert_spanish_messages(errors)
+    assert any("semilla" in e for e in errors)
+
+
+@pytest.mark.parametrize("seed", [0, 2**32 - 1])
+def test_seed_limits_are_valid(seed):
+    assert validate_simulation(market(), [call()], sim(seed=seed)) == []
+
+
+@pytest.mark.parametrize("mu", [-0.51, 1.01, math.nan, math.inf, -math.inf, "a", True])
+def test_bad_mu_is_error(mu):
+    errors = validate_simulation(market(), [call()], sim(mu=mu))
+    assert_spanish_messages(errors)
+    assert any("crecimiento esperado" in e for e in errors)
+
+
+@pytest.mark.parametrize("mu", [-0.5, 1.0, 0, 0.05, None])
+def test_mu_limits_and_empty_are_valid(mu):
+    assert validate_simulation(market(), [call()], sim(mu=mu)) == []
+
+
+def test_zero_days_is_error_for_scenarios_only():
+    # El MVP acepta días = 0; los escenarios no (no hay distribución).
+    assert validate_market(market(days=0)) == []
+    errors = validate_simulation(market(days=0), [call()], sim())
+    assert_spanish_messages(errors)
+    assert any("no hay distribución" in e for e in errors)
+
+
+def test_zero_vol_reuses_existing_market_message():
+    existing = validate_market(market(vol=0.0))
+    errors = validate_simulation(market(vol=0.0), [call()], sim())
+    assert existing
+    for message in existing:
+        assert message in errors
+
+
+@pytest.mark.parametrize("legs", [[], None])
+def test_no_legs_reuses_existing_message(legs):
+    errors = validate_simulation(market(), legs, sim())
+    assert errors == validate_legs(legs)
+
+
+def test_bad_leg_reuses_existing_message():
+    errors = validate_simulation(market(), [call(strike=0)], sim())
+    assert errors == validate_legs([call(strike=0)])
+
+
+def test_missing_market_or_settings_do_not_crash():
+    assert_spanish_messages(validate_simulation(None, [call()], sim()))
+    errors = validate_simulation(market(), [call()], None)
+    assert_spanish_messages(errors)
+    assert any("ajustes de la simulación" in e for e in errors)
+
+
+def test_several_simulation_errors_are_all_reported():
+    errors = validate_simulation(market(days=0), [call()], sim(n_paths=5, seed=-1, mu=2.0))
+    assert len(errors) == 4
+
+
+def test_simulation_messages_are_distinct():
+    messages = set()
+    for changes in [dict(n_paths=5), dict(seed=-1), dict(mu=2.0)]:
+        messages.update(validate_simulation(market(), [call()], sim(**changes)))
+    messages.update(validate_simulation(market(days=0), [call()], sim()))
+    assert len(messages) == 4
+
+
+# --- Escenarios: scenario_warnings (AC-A15, decisión A10) --------------------
+
+
+@pytest.mark.parametrize("underlying", ["Acción", "ETF", "Índice"])
+def test_scenario_warnings_always_present(underlying):
+    warnings = scenario_warnings(market(underlying=underlying))
+    assert_spanish_messages(warnings)
+    assert any("no una predicción" in w for w in warnings)
+    assert any("colas más gruesas" in w and "lognormal" in w for w in warnings)
+    assert MSG_NOT_ADVICE_TEXT in warnings
+
+
+@pytest.mark.parametrize("underlying", ["Acción", "ETF"])
+def test_scenario_warnings_american_bias(underlying):
+    warnings = scenario_warnings(market(underlying=underlying))
+    american = [w for w in warnings if "americanas" in w]
+    assert len(american) == 1
+    assert "volatilidad implícita" in american[0] and "simulación" in american[0]
+    assert not any("europeas" in w for w in warnings)
+
+
+def test_scenario_warnings_index_is_european():
+    warnings = scenario_warnings(market(underlying="Índice"))
+    assert any("europeas" in w for w in warnings)
+    assert not any("americanas" in w for w in warnings)
+
+
+def test_scenario_warnings_do_not_crash_with_invalid_market():
+    assert_spanish_messages(scenario_warnings(None))
+    assert_spanish_messages(scenario_warnings(market(underlying="Bono", days=None)))
+
+
+# Mismo texto de "no es asesoría" que market_warnings (coherencia con el MVP).
+MSG_NOT_ADVICE_TEXT = market_warnings(market())[0]

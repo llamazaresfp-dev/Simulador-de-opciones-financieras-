@@ -26,7 +26,14 @@ from opciones.models import (
 )
 from opciones.payoff import pnl_expiry, pnl_today, position_greeks, price_grid
 from opciones.pricing import bs_greeks, bs_price, default_premium
-from opciones.validation import market_warnings, validate_legs, validate_market
+from opciones.simulation import ScenarioResult, SimulationSettings, simulate_scenario
+from opciones.validation import (
+    market_warnings,
+    scenario_warnings,
+    validate_legs,
+    validate_market,
+    validate_simulation,
+)
 
 
 @dataclass
@@ -91,6 +98,8 @@ __all__ = [
     "LegSpec",
     "Market",
     "Metrics",
+    "ScenarioResult",
+    "SimulationSettings",
     "Template",
     "analyze",
     "build_legs",
@@ -104,6 +113,9 @@ __all__ = [
     "pnl_today",
     "position_greeks",
     "price_grid",
+    "scenario_warnings",
+    "simulate_scenario",
     "validate_legs",
     "validate_market",
+    "validate_simulation",
 ]

@@ -68,6 +68,16 @@ AMERICAN_MIN_VEGA = 1e-6
 # Desplazamiento de σ para medir esa vega con una diferencia central.
 AMERICAN_VEGA_BUMP = 1e-4
 
+# Regla de precisión (añadida el 20-11-26, aprobada por el usuario).
+# Una prima de mercado se cotiza en céntimos: el redondeo puede moverla
+# medio céntimo (PREMIUM_PRECISION). Un error de prima ΔP mueve la σ en
+# aproximadamente ΔP / vega. Si medio céntimo de prima puede mover la σ más
+# de 5 puntos de volatilidad (MAX_SIGMA_UNCERTAINTY = 0,05), la IV no
+# significa nada fiable: decimos que no es identificable.
+# Equivale a exigir vega ≥ 0,005 / 0,05 = 0,1 por unidad de σ (por acción).
+PREMIUM_PRECISION = 0.005
+MAX_SIGMA_UNCERTAINTY = 0.05
+
 
 @dataclass
 class IVResult:
@@ -177,7 +187,7 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     """IV con el árbol americano (500/501 pasos promediados, vía `option_price`).
 
     Orden: límites americanos -> identificabilidad -> buscador (brentq) ->
-    guarda de vega casi nula en la σ encontrada.
+    guarda de vega casi nula y regla de precisión en la σ encontrada.
 
     ¿Por qué algunas primas no tienen IV identificable? En una opción
     americana muy dentro del dinero lo óptimo es ejercer ya, y entonces su
@@ -235,6 +245,13 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     if not math.isfinite(vega):
         return IVResult(None, MSG_SOLVER_FAILED)
     if vega < AMERICAN_MIN_VEGA:
+        return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
+    # Regla de precisión: ¿cuánto se movería σ con medio céntimo de prima?
+    # (PREMIUM_PRECISION / vega > MAX_SIGMA_UNCERTAINTY, escrito con una
+    # multiplicación para no dividir.) La guarda anterior de 1e-6 queda
+    # cubierta por esta regla, pero se mantiene: es inofensiva y documenta
+    # el caso extremo de vega casi 0.
+    if vega * MAX_SIGMA_UNCERTAINTY < PREMIUM_PRECISION:
         return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
     return IVResult(float(vol), None)
 

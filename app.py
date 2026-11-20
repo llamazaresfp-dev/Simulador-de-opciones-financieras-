@@ -36,8 +36,10 @@ from opciones import (
     simulate_scenario,
     validate_legs,
     validate_market,
+    uses_binomial,
     validate_simulation,
 )
+from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES, PRICING_MODELS
 from opciones.validation import MSG_NOT_ADVICE
 
 TAB_NAMES = ["Catálogo", "Constructor", "Ajustes"]
@@ -69,6 +71,11 @@ MARKET_DEFAULTS = {
     "q_pct": 0.0,
 }
 SETTINGS_DEFAULTS = CommissionSettings()
+# Nombres que ve el usuario para cada modelo de valoración (Etapa B1).
+PRICING_LABELS = {
+    PRICING_BINOMIAL: "Binomial (americano)",
+    PRICING_BLACK_SCHOLES: "Black-Scholes (europeo)",
+}
 # Valores iniciales de la simulación (100 000 trayectorias, semilla 42, μ vacío).
 SIMULATION_DEFAULTS = SimulationSettings()
 
@@ -101,6 +108,11 @@ def init_state() -> None:
     st.session_state.setdefault("n_sims", SIMULATION_DEFAULTS.n_paths)
     st.session_state.setdefault("seed", SIMULATION_DEFAULTS.seed)
     st.session_state.setdefault("mu_pct", None)
+
+    # Modelo de valoración para Acción/ETF (Etapa B1): entrada simple, como
+    # las comisiones. Se crea aquí, ANTES de dibujar la barra lateral, porque
+    # market_from_state() la lee para construir el Market.
+    st.session_state.setdefault("pricing_model", PRICING_BINOMIAL)
 
     st.session_state.setdefault("main_tab", "Catálogo")
 
@@ -149,6 +161,7 @@ def market_from_state() -> Market:
         days=st.session_state["days"],
         rate=percent_to_fraction(st.session_state["rate_pct"]),
         q=percent_to_fraction(st.session_state["q_pct"]),
+        pricing_model=st.session_state["pricing_model"],
     )
 
 
@@ -195,7 +208,9 @@ def legs_from_state() -> list[Leg]:
 def refresh_auto_prices(market: Market) -> None:
     """Recalcula en cada rerun las primas que NO son manuales.
 
-    - Opción: prima Black-Scholes del motor (default_premium).
+    - Opción: prima del modelo activo (default_premium del motor: árbol
+      binomial en Acción/ETF por defecto, Black-Scholes en Índice o si el
+      usuario lo elige en Ajustes).
     - Acción: precio de entrada = spot actual.
     Las primas manuales se respetan aunque cambien los datos globales.
     """
@@ -256,7 +271,7 @@ def on_premium_change(leg_id: int) -> None:
 
 
 def reset_premium(leg_id: int) -> None:
-    """Botón "↺ BS": la prima vuelve a calcularse automáticamente."""
+    """Botón "↺ binomial" / "↺ BS" / "↺ spot": la prima vuelve a ser automática."""
     leg = find_leg(leg_id)
     if leg is not None:
         leg["premium_manual"] = False
@@ -363,7 +378,8 @@ def render_template_card(template, disabled: bool) -> None:
 def render_builder(market: Market, market_errors: list[str]) -> None:
     """Filas de patas, gráfico, métricas, griegas y avisos."""
     st.subheader("Constructor de estrategias")
-    render_leg_rows()
+    st.caption(active_model_caption(market))
+    render_leg_rows(market)
     st.button("+ añadir pata", on_click=add_leg)
     st.divider()
 
@@ -385,10 +401,31 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
     render_notices(market)
 
 
-def render_leg_rows() -> None:
+def active_model_caption(market: Market) -> str:
+    """Frase que dice con qué modelo se valoran ahora las opciones.
+
+    Va en st.caption (no en st.metric, que recorta los textos largos).
+    """
+    if uses_binomial(market):
+        return (
+            "Modelo activo: Binomial (americano), árbol de Cox-Ross-Rubinstein "
+            "para primas, curva «hoy», griegas e IV. Se cambia en Ajustes."
+        )
+    if market.underlying in ("Acción", "ETF"):
+        return (
+            "Modelo activo: Black-Scholes (europeo), elegido en Ajustes. "
+            "Para opciones americanas es una aproximación."
+        )
+    return (
+        "Modelo activo: Black-Scholes (europeo). Las opciones sobre índices son "
+        "europeas; el selector de modelo de Ajustes no tiene efecto con Índice."
+    )
+
+
+def render_leg_rows(market: Market) -> None:
     """Una fila de widgets por cada pata guardada en session_state."""
     for number, leg in enumerate(st.session_state["legs"], start=1):
-        render_leg_row(number, leg)
+        render_leg_row(number, leg, market)
 
 
 def sync_widget(leg: dict, field: str) -> str:
@@ -402,10 +439,30 @@ def sync_widget(leg: dict, field: str) -> str:
     return key
 
 
-def render_leg_row(number: int, leg: dict) -> None:
+def reset_label_and_help(is_stock: bool, binomial: bool) -> tuple[str, str]:
+    """Texto y ayuda del botón que devuelve la prima a automática."""
+    if is_stock:
+        return "↺ spot", "Volver al precio automático: el spot actual."
+    if binomial:
+        return "↺ binomial", "Volver a la prima automática del modelo binomial (americano)."
+    return "↺ BS", "Volver a la prima automática de Black-Scholes (europeo)."
+
+
+def price_origin(leg: dict, binomial: bool) -> str:
+    """De dónde sale el precio de la pata: manual, spot, binomial o Black-Scholes."""
+    if leg["premium_manual"]:
+        return "manual"
+    if leg["kind"] == "stock":
+        return "spot"
+    return "binomial" if binomial else "Black-Scholes"
+
+
+def render_leg_row(number: int, leg: dict, market: Market) -> None:
     """Fila de una pata: tipo, dirección, strike, cantidad, prima y botones."""
     leg_id = leg["id"]
     is_stock = leg["kind"] == "stock"
+    binomial = uses_binomial(market)
+    reset_label, reset_help = reset_label_and_help(is_stock, binomial)
     cols = st.columns([1.1, 1.4, 1.1, 1.0, 1.2, 0.9, 0.8], vertical_alignment="bottom")
 
     cols[0].selectbox(
@@ -452,16 +509,15 @@ def render_leg_row(number: int, leg: dict) -> None:
         args=(leg_id,),
     )
     cols[5].button(
-        "↺ spot" if is_stock else "↺ BS",
+        reset_label,
         key=f"leg_{leg_id}_reset",
         on_click=reset_premium,
         args=(leg_id,),
         disabled=not leg["premium_manual"],
-        help="Volver al precio automático (Black-Scholes; spot en acciones).",
+        help=reset_help,
     )
     cols[6].button("Quitar", key=f"leg_{leg_id}_remove", on_click=remove_leg, args=(leg_id,))
-    origin = "manual" if leg["premium_manual"] else ("spot" if is_stock else "Black-Scholes")
-    st.caption(f"Pata {number}: precio {origin}.")
+    st.caption(f"Pata {number}: precio {price_origin(leg, binomial)}.")
 
 
 def build_chart(analysis, market: Market) -> go.Figure:
@@ -737,7 +793,8 @@ def render_notices(market: Market) -> None:
 
 
 def render_settings() -> None:
-    """Comisiones. Los widgets copian su valor a session_state con callbacks."""
+    """Modelo, comisiones y simulación. Los widgets copian su valor a session_state con callbacks."""
+    render_pricing_settings()
     st.subheader("Ajustes de comisiones")
     st.number_input(
         "Comisión por contrato de opción (USD)",
@@ -771,6 +828,39 @@ def render_settings() -> None:
         "si la opción vence con valor; en la curva «hoy» se cobra en todas las opciones."
     )
     render_simulation_settings()
+
+
+def render_pricing_settings() -> None:
+    """Selector del modelo de valoración (mismo patrón de callbacks que las comisiones).
+
+    El widget (`pricing_model_input`) copia su valor a la entrada simple
+    `pricing_model`; el valor inicial del widget sale de esa entrada, así
+    no se pierde al cambiar de pestaña.
+    """
+    st.subheader("Modelo de valoración")
+    st.radio(
+        "Modelo de valoración para Acción/ETF",
+        list(PRICING_MODELS),
+        index=list(PRICING_MODELS).index(st.session_state["pricing_model"]),
+        format_func=PRICING_LABELS.get,
+        key="pricing_model_input",
+        on_change=copy_setting,
+        args=("pricing_model",),
+        help=(
+            "Binomial: modelo americano (permite ejercer antes del vencimiento). "
+            "Black-Scholes: modelo europeo, útil para comparar."
+        ),
+    )
+    st.caption(
+        "Las opciones sobre acciones y ETF son americanas: el modelo binomial "
+        "(por defecto) tiene en cuenta el ejercicio anticipado en las primas "
+        "automáticas, la curva «hoy», las griegas y la IV. Elige Black-Scholes "
+        "para comparar. Las primas escritas a mano no cambian."
+    )
+    st.caption(
+        "Con Índice este ajuste no tiene efecto: sus opciones son europeas y "
+        "siempre se valoran con Black-Scholes."
+    )
 
 
 def render_simulation_settings() -> None:

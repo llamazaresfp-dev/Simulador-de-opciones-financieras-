@@ -22,6 +22,7 @@ from opciones import IVResult, Leg, Market, bs_price, implied_vol
 from opciones.binomial import crr_price
 from opciones.implied_vol import (
     AMERICAN_MIN_VEGA,
+    MAX_SIGMA_UNCERTAINTY,
     MSG_ABOVE_UPPER_BOUND,
     MSG_AMERICAN_BELOW_INTRINSIC,
     MSG_AMERICAN_NOT_IDENTIFIABLE,
@@ -31,6 +32,7 @@ from opciones.implied_vol import (
     MSG_PREMIUM_NOT_POSITIVE,
     MSG_SOLVER_FAILED,
     MSG_STOCK_LEG,
+    PREMIUM_PRECISION,
     VOL_LOW,
 )
 from opciones.pricing import option_greeks
@@ -110,10 +112,17 @@ def test_round_trip_tree_premium(kind, strike, sigma, days):
         return
 
     if result.vol is None:
-        # Solo se acepta si el precio con σ mínima ya alcanza la prima
-        # (región plana en σ, p. ej. call ITM con forward > intrínseco).
+        # Solo se acepta si (a) el precio con σ mínima ya alcanza la prima
+        # (región plana en σ, p. ej. call ITM con forward > intrínseco), o
+        # (b) la regla de precisión (20-11-26): medio céntimo de prima movería
+        # σ más de 5 puntos (vega < 0,1 por unidad de σ). Casos (b) de esta
+        # matriz, todos a 1 día con σ = 60 %: call K=90, call K=110, put K=90
+        # (vega ≈ 0,007–0,02 por unidad de σ: incertidumbre de σ 0,25–0,73).
         assert result.message == MSG_AMERICAN_NOT_IDENTIFIABLE
-        assert tree_price(kind, market, strike, VOL_LOW) >= premium - PRICE_TOL
+        flat = tree_price(kind, market, strike, VOL_LOW) >= premium - PRICE_TOL
+        vega_per_unit = option_greeks(kind, market, strike)["vega"] * 100
+        imprecise = vega_per_unit * MAX_SIGMA_UNCERTAINTY < PREMIUM_PRECISION
+        assert flat or imprecise
         return
 
     # El precio se reproduce siempre que hay IV.
@@ -424,3 +433,62 @@ def test_european_branch_has_no_vega_guard(underlying, pricing_model):
     result = implied_vol(option_leg("call", 90.0, premium), market)
     assert result.message is None
     assert result.vol == pytest.approx(0.27348052056262784, abs=1e-9)
+
+
+# --- Regla de precisión (añadido aprobado por el usuario, 20-11-26) -----------
+#
+# Las primas se cotizan en céntimos: medio céntimo de redondeo no debe poder
+# mover la σ más de 5 puntos. Si vega < 0,005 / 0,05 = 0,1 por unidad de σ,
+# la IV americana se declara no identificable.
+
+
+def test_precision_rule_constants():
+    assert PREMIUM_PRECISION == 0.005
+    assert MAX_SIGMA_UNCERTAINTY == 0.05
+
+
+def test_cent_rounded_deep_itm_call_is_not_identifiable():
+    """Call S=100, K=80, 1 día, prima 20,01 (redondeada al céntimo).
+
+    Antes de la regla daba una σ enorme (≈ 1,4–1,5) con vega ≈ 0,01 por
+    unidad de σ: medio céntimo movía σ ≈ 0,5. Ahora devuelve el mensaje.
+    """
+    market = make_market(days=1, vol=0.25, q=0.0)
+    result = implied_vol(option_leg("call", 80.0, 20.01), market)
+    check_result_shape(result)
+    assert result.vol is None
+    assert result.message == MSG_AMERICAN_NOT_IDENTIFIABLE
+
+
+# Casos de la malla siguiente que la regla marca (medido): σ = 10 % a 30 días
+# con strikes a ±10 % del spot. Primas < 0,001 o vega ≈ 0,01 por unidad de σ:
+# medio céntimo movería σ entre 0,07 y 0,44. Están mal condicionados de verdad.
+PRECISION_FLAGGED = {
+    ("call", 90.0, 0.10, 30),
+    ("put", 90.0, 0.10, 30),
+    ("call", 110.0, 0.10, 30),
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("strike", (90.0, 100.0, 110.0))
+@pytest.mark.parametrize("sigma", (0.10, 0.25, 0.60))
+@pytest.mark.parametrize("days", (30, 90, 365))
+def test_precision_rule_keeps_normal_round_trips(kind, strike, sigma, days):
+    """ATM/OTM/ITM moderado, 30–365 días, σ 10–60 %: la IV sigue saliendo.
+
+    Excepción medida y explicada: PRECISION_FLAGGED (mal condicionados).
+    """
+    market = make_market(days=days, vol=sigma)
+    premium = tree_price(kind, market, strike, sigma)
+    if not above_intrinsic(premium, intrinsic(kind, SPOT, strike)):
+        pytest.skip("Prima en el intrínseco: precio plano en σ (otro caso).")
+    result = implied_vol(option_leg(kind, strike, premium), market)
+    vega_per_unit = option_greeks(kind, market, strike)["vega"] * 100
+    if (kind, strike, sigma, days) in PRECISION_FLAGGED:
+        assert vega_per_unit * MAX_SIGMA_UNCERTAINTY < PREMIUM_PRECISION
+        assert result.vol is None
+        assert result.message == MSG_AMERICAN_NOT_IDENTIFIABLE
+        return
+    assert result.message is None
+    assert result.vol == pytest.approx(sigma, abs=SIGMA_TOL)

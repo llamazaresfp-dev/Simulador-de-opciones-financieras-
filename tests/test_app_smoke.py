@@ -15,12 +15,15 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from opciones import Leg, Market, implied_vol
+from opciones import Leg, Market, default_premium, implied_vol
 from opciones.implied_vol import MSG_ABOVE_UPPER_BOUND
 from opciones.validation import (
+    MSG_AMERICAN,
     MSG_BAD_MU,
     MSG_BAD_PATHS,
     MSG_BAD_SEED,
+    MSG_BINOMIAL_ACTIVE,
+    MSG_EUROPEAN,
     MSG_FAT_TAILS,
     MSG_MODEL,
     MSG_NOT_ADVICE,
@@ -368,10 +371,18 @@ def set_manual_premium(at: AppTest, premium: float) -> int:
     return leg_id
 
 
-def expected_iv_pct(premium: float) -> float:
-    """IV en % (2 decimales) de la call ATM por defecto, calculada con el motor."""
-    market = Market(underlying="Acción", spot=100.0, vol=0.20, days=30, rate=0.04, q=0.0)
-    result = implied_vol(Leg("call", 1, 1.0, 100.0, premium), market)
+def expected_iv_pct(premium: float, kind: str = "call", q: float = 0.0,
+                    pricing_model: str = "binomial") -> float:
+    """IV en % (2 decimales) de la pata ATM por defecto, calculada con el motor.
+
+    El modelo es explícito: la app por defecto valora Acción con el árbol
+    binomial (americano), así que el oráculo usa ese mismo modelo. Con la
+    call ATM y q = 0 la IV americana y la europea coinciden (una call sin
+    dividendos no se ejerce antes); el test del put con q > 0 sí las distingue.
+    """
+    market = Market(underlying="Acción", spot=100.0, vol=0.20, days=30, rate=0.04, q=q,
+                    pricing_model=pricing_model)
+    result = implied_vol(Leg(kind, 1, 1.0, 100.0, premium), market)
     return round(result.vol * 100, 2)
 
 
@@ -453,6 +464,26 @@ def test_use_iv_button_updates_automatic_premiums(app):
     assert app.session_state["legs"][1]["price"] > auto_before
 
 
+def test_manual_put_iv_uses_american_model(app):
+    """La IV de la app es la americana: put ATM, q = 2 %, prima 3,00.
+
+    Aquí la IV americana (≈ 26,92 %) y la europea (≈ 27,01 %) difieren,
+    así que el test demuestra qué modelo usa la app.
+    """
+    app.number_input(key="q_pct").set_value(2.0).run()
+    leg_id = app.session_state["legs"][0]["id"]
+    app.selectbox(key=f"leg_{leg_id}_kind").set_value("put").run()
+    set_manual_premium(app, 3.0)
+
+    assert not app.exception
+    american = expected_iv_pct(3.0, kind="put", q=0.02, pricing_model="binomial")
+    european = expected_iv_pct(3.0, kind="put", q=0.02, pricing_model="black_scholes")
+    assert american != european
+    captions = [caption.value for caption in scenarios_expander(app).get("caption")]
+    assert any(f"volatilidad implícita {american:.2f} %" in text for text in captions)
+    assert not any(f"volatilidad implícita {european:.2f} %" in text for text in captions)
+
+
 def test_out_of_bounds_premium_shows_iv_message(app):
     """Prima mayor que el spot en una call: no existe IV, se explica y no hay botón."""
     set_manual_premium(app, 150.0)
@@ -474,3 +505,133 @@ def test_not_advice_notice_not_duplicated(app):
     assert MSG_NOT_ADVICE not in [info.value for info in expander.get("info")]
     builder_infos = [info.value for info in app.tabs[1].info]
     assert builder_infos.count(MSG_NOT_ADVICE) == 1
+
+
+# ---------------------------------------------------------------------------
+# Etapa B1, bloque 6: selector del modelo de valoración
+# ---------------------------------------------------------------------------
+
+
+def app_market(at: AppTest, pricing_model: str) -> Market:
+    """El Market que ve la app (barra lateral) con el modelo indicado."""
+    state = at.session_state
+    return Market(
+        underlying=state["underlying"],
+        spot=state["spot"],
+        vol=state["vol_pct"] / 100,
+        days=state["days"],
+        rate=state["rate_pct"] / 100,
+        q=state["q_pct"] / 100,
+        pricing_model=pricing_model,
+    )
+
+
+def reset_label(at: AppTest, leg_id: int) -> str:
+    return at.button(key=f"leg_{leg_id}_reset").label
+
+
+def test_default_model_is_binomial(app):
+    assert app.session_state["pricing_model"] == "binomial"
+    leg = app.session_state["legs"][0]
+    expected = default_premium("call", app_market(app, "binomial"), leg["strike"])
+    assert leg["price"] == pytest.approx(expected, abs=1e-12)
+
+
+def test_pricing_radio_has_both_options(app):
+    radio = app.radio(key="pricing_model_input")
+    assert radio.label == "Modelo de valoración para Acción/ETF"
+    assert radio.options == ["Binomial (americano)", "Black-Scholes (europeo)"]
+    assert radio.value == "binomial"
+
+
+def test_switch_to_black_scholes_recomputes_auto_keeps_manual(app):
+    app.button(key="open_bull_call_spread").click().run()
+    legs = app.session_state["legs"]
+    manual_id = legs[0]["id"]
+    app.number_input(key=f"leg_{manual_id}_price").set_value(7.77).run()
+    binomial_auto = app.session_state["legs"][1]["price"]
+
+    app.radio(key="pricing_model_input").set_value("black_scholes").run()
+
+    assert not app.exception
+    assert app.session_state["pricing_model"] == "black_scholes"
+    legs = app.session_state["legs"]
+    assert legs[0]["price"] == pytest.approx(7.77)
+    assert legs[0]["premium_manual"]
+    expected = default_premium("call", app_market(app, "black_scholes"), legs[1]["strike"])
+    assert legs[1]["price"] == pytest.approx(expected, abs=1e-12)
+    # Y de vuelta a binomial: la prima automática vuelve al valor del árbol.
+    app.radio(key="pricing_model_input").set_value("binomial").run()
+    assert app.session_state["legs"][1]["price"] == pytest.approx(binomial_auto, abs=1e-12)
+    assert app.session_state["legs"][0]["price"] == pytest.approx(7.77)
+
+
+def test_switch_changes_put_premium(app):
+    """Un put ATM: la prima binomial (americana) es mayor que la de BS."""
+    leg_id = app.session_state["legs"][0]["id"]
+    app.selectbox(key=f"leg_{leg_id}_kind").set_value("put").run()
+    binomial_price = app.session_state["legs"][0]["price"]
+    app.radio(key="pricing_model_input").set_value("black_scholes").run()
+    bs_value = app.session_state["legs"][0]["price"]
+    assert binomial_price > bs_value
+
+
+def test_index_ignores_selector(app):
+    app.selectbox(key="underlying").set_value("Índice").run()
+    before = [leg["price"] for leg in app.session_state["legs"]]
+
+    app.radio(key="pricing_model_input").set_value("black_scholes").run()
+
+    assert not app.exception
+    after = [leg["price"] for leg in app.session_state["legs"]]
+    assert after == before
+    builder_captions = [caption.value for caption in app.tabs[1].caption]
+    settings_captions = [caption.value for caption in app.tabs[2].caption]
+    assert any("no tiene efecto" in text for text in builder_captions)
+    assert any("no tiene efecto" in text for text in settings_captions)
+    assert MSG_EUROPEAN in [info.value for info in app.tabs[1].info]
+
+
+def test_reset_button_label_follows_model(app):
+    leg_id = app.session_state["legs"][0]["id"]
+    assert reset_label(app, leg_id) == "↺ binomial"
+    captions = [caption.value for caption in app.tabs[1].caption]
+    assert "Pata 1: precio binomial." in captions
+
+    app.radio(key="pricing_model_input").set_value("black_scholes").run()
+    assert reset_label(app, leg_id) == "↺ BS"
+    captions = [caption.value for caption in app.tabs[1].caption]
+    assert "Pata 1: precio Black-Scholes." in captions
+
+    app.selectbox(key=f"leg_{leg_id}_kind").set_value("stock").run()
+    assert reset_label(app, leg_id) == "↺ spot"
+    assert "Pata 1: precio spot." in [caption.value for caption in app.tabs[1].caption]
+
+
+def test_reset_button_label_with_index_is_bs(app):
+    app.selectbox(key="underlying").set_value("Índice").run()
+    leg_id = app.session_state["legs"][0]["id"]
+    assert reset_label(app, leg_id) == "↺ BS"
+
+
+def test_manual_premium_caption_and_reset(app):
+    leg_id = set_manual_premium(app, 4.0)
+    assert "Pata 1: precio manual." in [caption.value for caption in app.tabs[1].caption]
+    app.button(key=f"leg_{leg_id}_reset").click().run()
+    assert not app.session_state["legs"][0]["premium_manual"]
+    assert "Pata 1: precio binomial." in [caption.value for caption in app.tabs[1].caption]
+
+
+def test_active_model_caption_and_warnings(app):
+    captions = [caption.value for caption in app.tabs[1].caption]
+    assert any(text.startswith("Modelo activo: Binomial (americano)") for text in captions)
+    assert MSG_BINOMIAL_ACTIVE in [info.value for info in app.tabs[1].info]
+    # No es una métrica (st.metric recorta los textos largos).
+    assert not any("Modelo activo" in metric.label for metric in app.metric)
+
+    app.radio(key="pricing_model_input").set_value("black_scholes").run()
+
+    captions = [caption.value for caption in app.tabs[1].caption]
+    assert any(text.startswith("Modelo activo: Black-Scholes (europeo)") for text in captions)
+    infos = [info.value for info in app.tabs[1].info]
+    assert MSG_AMERICAN in infos and MSG_BINOMIAL_ACTIVE not in infos

@@ -1,8 +1,14 @@
-"""Tests de la probabilidad de beneficio (PoP) exacta (Etapa A, bloque 2).
+"""Tests de escenarios al vencimiento (Etapa A, bloques 2 y 3a).
 
-Criterios: AC-A1 (parte exacta: neutral al riesgo vs μ), AC-A2 (long
-call = N(d2), long put = N(−d2)) y AC-A3 (estrategias con varios tramos
-contra una integración numérica independiente, y extremos PoP = 0 / 1).
+Bloque 2 (PoP exacta): AC-A1 (parte exacta: neutral al riesgo vs μ),
+AC-A2 (long call = N(d2), long put = N(−d2)) y AC-A3 (estrategias con
+varios tramos contra una integración numérica independiente, y
+extremos PoP = 0 / 1).
+
+Bloque 3a (Monte Carlo): AC-A1 (media de S_T), AC-A4 (PoP simulada vs
+exacta), AC-A5 (percentiles e histograma), AC-A6 (valor esperado),
+AC-A8 (semilla y valores por defecto), AC-A9 (rapidez) y AC-A10 (sin
+NaN ni infinitos).
 
 El oráculo independiente NO usa los breakevens de las métricas: busca
 los cambios de signo del P&L con una rejilla muy densa, afina cada uno
@@ -11,6 +17,7 @@ scipy.integrate.quad (enmienda A2 del contrato de validación).
 """
 
 import math
+import time
 
 import numpy as np
 import pytest
@@ -20,7 +27,14 @@ from scipy.stats import norm
 from opciones import TEMPLATES, CommissionSettings, Leg, Market, build_legs, compute_metrics
 from opciones.metrics import ZERO_TOL
 from opciones.payoff import pnl_expiry
-from opciones.simulation import SimulationSettings, exact_pop
+from opciones.commissions import open_fee
+from opciones.simulation import (
+    ScenarioResult,
+    SimulationSettings,
+    _sample_terminal,
+    exact_pop,
+    simulate_scenario,
+)
 
 FEES = CommissionSettings()  # 0,65 USD por contrato, cierre incluido
 NO_FEES = CommissionSettings(per_contract=0.0, index_surcharge=0.0, include_close=True)
@@ -265,3 +279,231 @@ def test_simulation_settings_defaults():
     assert sim.n_paths == 100_000
     assert sim.seed == 42
     assert sim.mu is None
+
+
+# =====================================================================
+# Bloque 3a: Monte Carlo y ScenarioResult
+# =====================================================================
+
+FLOAT_FIELDS = ["pop_exact", "pop_mc", "mean_pnl", "pnl_std", "p5", "p50", "p95", "mu_used"]
+
+
+def assert_all_finite(result):
+    """Ningún campo del resultado puede ser NaN ni infinito (AC-A10)."""
+    for name in FLOAT_FIELDS:
+        value = getattr(result, name)
+        assert isinstance(value, float), name
+        assert math.isfinite(value), name
+    assert np.all(np.isfinite(result.hist_counts))
+    assert np.all(np.isfinite(result.hist_edges))
+
+
+# --- AC-A8: valores por defecto y reproducibilidad -----------------------
+
+
+def test_scenario_uses_default_paths_and_records_them():
+    result = simulate_scenario(MARKET, template_legs("long_call"), FEES, SimulationSettings())
+    assert isinstance(result, ScenarioResult)
+    assert result.n_paths == 100_000
+    assert isinstance(result.n_paths, int)
+    assert result.hist_counts.sum() == 100_000
+
+
+def test_same_seed_gives_identical_result():
+    legs = template_legs("iron_condor")
+    a = simulate_scenario(MARKET, legs, FEES, SimulationSettings(seed=42))
+    b = simulate_scenario(MARKET, legs, FEES, SimulationSettings(seed=42))
+    for name in FLOAT_FIELDS:
+        assert getattr(a, name) == getattr(b, name), name
+    assert np.array_equal(a.hist_counts, b.hist_counts)
+    assert np.array_equal(a.hist_edges, b.hist_edges)
+
+
+def test_other_seed_changes_mc_but_not_exact_pop():
+    legs = template_legs("iron_condor")
+    a = simulate_scenario(MARKET, legs, FEES, SimulationSettings(seed=42))
+    b = simulate_scenario(MARKET, legs, FEES, SimulationSettings(seed=7))
+    assert a.pop_exact == b.pop_exact
+    assert a.pop_mc != b.pop_mc
+    assert a.mean_pnl != b.mean_pnl
+
+
+def test_pop_exact_field_is_the_exact_pop():
+    legs = template_legs("iron_condor")
+    result = simulate_scenario(MARKET, legs, FEES, RISK_NEUTRAL)
+    assert result.pop_exact == exact_pop(MARKET, legs, FEES, RISK_NEUTRAL)
+    assert result.pop_exact == pytest.approx(0.5721, abs=5e-4)
+
+
+# --- AC-A1: media de S_T y escenario μ -----------------------------------
+
+
+def test_mean_terminal_price_is_forward_in_risk_neutral_mode():
+    drift = MARKET.rate - MARKET.q
+    prices = _sample_terminal(MARKET, SimulationSettings(), drift)
+    assert prices.shape == (100_000,)
+    expected = MARKET.spot * math.exp(drift * MARKET.T)
+    standard_error = prices.std() / math.sqrt(prices.size)
+    assert abs(prices.mean() - expected) <= 4 * standard_error
+
+
+def test_mean_terminal_price_follows_mu():
+    mu = 0.5
+    prices = _sample_terminal(MARKET, SimulationSettings(mu=mu), mu)
+    expected = MARKET.spot * math.exp(mu * MARKET.T)
+    standard_error = prices.std() / math.sqrt(prices.size)
+    assert abs(prices.mean() - expected) <= 4 * standard_error
+
+
+def test_simulation_uses_the_sampling_helper():
+    # Enmienda A8: simulate_scenario usa exactamente las muestras de
+    # _sample_terminal (misma semilla -> mismos precios -> mismos números).
+    legs = template_legs("long_call")
+    sim = SimulationSettings(seed=123)
+    result = simulate_scenario(MARKET, legs, FEES, sim)
+    prices = _sample_terminal(MARKET, sim, MARKET.rate - MARKET.q)
+    pnl = pnl_expiry(legs, MARKET, FEES, prices)
+    assert result.pop_mc == float(np.mean(pnl > ZERO_TOL))
+    assert result.mean_pnl == float(np.mean(pnl))
+    assert result.p50 == float(np.percentile(pnl, 50))
+
+
+def test_mu_used_reports_the_scenario():
+    legs = template_legs("long_call")
+    neutral = simulate_scenario(MARKET, legs, FEES, SimulationSettings())
+    assert neutral.mu_used == pytest.approx(MARKET.rate - MARKET.q, abs=1e-15)
+    custom = simulate_scenario(MARKET, legs, FEES, SimulationSettings(mu=0.2))
+    assert custom.mu_used == 0.2
+
+
+def test_higher_mu_increases_simulated_long_call_results():
+    legs = template_legs("long_call")
+    results = [simulate_scenario(MARKET, legs, FEES, SimulationSettings(mu=mu)) for mu in (-0.5, 0.0, 1.0)]
+    pops = [r.pop_mc for r in results]
+    means = [r.mean_pnl for r in results]
+    assert pops == sorted(pops) and len(set(pops)) == 3
+    assert means == sorted(means) and len(set(means)) == 3
+
+
+# --- AC-A4: PoP simulada vs exacta en todo el catálogo ------------------
+
+
+@pytest.mark.parametrize("key", [t.key for t in TEMPLATES])
+@pytest.mark.parametrize("underlying,spot", [("Acción", 100.0), ("Índice", 4500.0)])
+@pytest.mark.parametrize("fee", [0.65, 5.0])
+def test_mc_pop_within_four_standard_errors_of_exact(key, underlying, spot, fee):
+    market = make_market(underlying, spot)
+    fees = CommissionSettings(per_contract=fee)
+    result = simulate_scenario(market, template_legs(key, market), fees, RISK_NEUTRAL)
+    p = result.pop_exact
+    standard_error = math.sqrt(p * (1 - p) / result.n_paths)
+    assert abs(result.pop_mc - p) <= 4 * standard_error
+
+
+# --- AC-A5: percentiles e histograma ------------------------------------
+
+
+@pytest.mark.parametrize("key", [t.key for t in TEMPLATES])
+def test_percentiles_ordered_and_inside_metric_range(key):
+    legs = template_legs(key)
+    result = simulate_scenario(MARKET, legs, FEES, RISK_NEUTRAL)
+    assert result.p5 <= result.p50 <= result.p95
+    metrics = compute_metrics(legs, MARKET, FEES)
+    if metrics.worst_pnl is not None:
+        assert result.p5 >= metrics.worst_pnl - 1e-9
+    if metrics.best_pnl is not None:
+        assert result.p95 <= metrics.best_pnl + 1e-9
+    assert result.hist_counts.sum() == result.n_paths
+    assert len(result.hist_edges) == len(result.hist_counts) + 1
+    assert len(result.hist_counts) == 50
+    assert np.all(np.diff(result.hist_edges) > 0)
+
+
+def test_histogram_is_clipped_to_central_percentiles():
+    # Long call: ganancia ilimitada. El histograma cubre del percentil 0,5 %
+    # al 99,5 %; lo que queda fuera se acumula en los bins de los extremos.
+    legs = template_legs("long_call")
+    sim = SimulationSettings()
+    result = simulate_scenario(MARKET, legs, FEES, sim)
+    pnl = pnl_expiry(legs, MARKET, FEES, _sample_terminal(MARKET, sim, MARKET.rate - MARKET.q))
+    low, high = np.percentile(pnl, [0.5, 99.5])
+    assert result.hist_edges[0] == pytest.approx(low)
+    assert result.hist_edges[-1] == pytest.approx(high)
+    assert pnl.max() > high  # hay cola fuera del rango...
+    assert result.hist_counts[-1] >= np.sum(pnl > high)  # ...y cae en el último bin
+    assert result.hist_counts.sum() == sim.n_paths
+
+
+def test_histogram_handles_constant_pnl():
+    # Call comprada + put vendida (strike 100, prima 0) + 100 acciones
+    # vendidas a 100: al vencimiento el P&L es siempre 0 (todos los
+    # percentiles iguales). El histograma no debe romperse.
+    legs = [
+        Leg("call", 1, 1, 100.0, 0.0),
+        Leg("put", -1, 1, 100.0, 0.0),
+        Leg("stock", -1, 100, None, 100.0),
+    ]
+    result = simulate_scenario(MARKET, legs, NO_FEES, RISK_NEUTRAL)
+    assert result.hist_counts.sum() == result.n_paths
+    assert result.p5 == pytest.approx(result.p95, abs=1e-6)
+    assert_all_finite(result)
+
+
+# --- AC-A6: valor esperado (no descontado) del long call ----------------
+
+
+def _long_call_ev_formula(market, leg, settings):
+    """100·prima·(e^{rT} − 1) − comisión de apertura − comisión de cierre·P(S_T > K)."""
+    fee = open_fee(leg, market, settings)  # misma tarifa al cerrar
+    prob_itm = norm.cdf(d2_at(market, leg.strike))
+    return 100 * leg.price * (math.exp(market.rate * market.T) - 1) - fee - fee * prob_itm
+
+
+def test_long_call_ev_formula_matches_numeric_integration():
+    # Enmienda A3: comprobación determinista (sin azar) de la fórmula contra
+    # la integral del P&L del motor sobre la densidad normal de z.
+    legs = template_legs("long_call")
+    drift = MARKET.rate - MARKET.q
+    sigma_t = MARKET.vol * math.sqrt(MARKET.T)
+    z = np.linspace(-10, 10, 2_000_001)
+    prices = MARKET.spot * np.exp((drift - MARKET.vol**2 / 2) * MARKET.T + sigma_t * z)
+    pnl = np.asarray(pnl_expiry(legs, MARKET, FEES, prices))
+    integral = np.trapezoid(pnl * norm.pdf(z), z)
+    formula = _long_call_ev_formula(MARKET, legs[0], FEES)
+    assert integral == pytest.approx(formula, abs=1e-3)
+    assert formula == pytest.approx(0.8435, abs=1e-3)
+
+
+def test_long_call_mc_mean_matches_ev_formula():
+    legs = template_legs("long_call")
+    result = simulate_scenario(MARKET, legs, FEES, RISK_NEUTRAL)
+    formula = _long_call_ev_formula(MARKET, legs[0], FEES)
+    standard_error = result.pnl_std / math.sqrt(result.n_paths)
+    assert abs(result.mean_pnl - formula) <= 4 * standard_error
+
+
+# --- AC-A10: sin NaN ni infinitos en casos extremos ---------------------
+
+
+@pytest.mark.parametrize("key", [t.key for t in TEMPLATES])
+@pytest.mark.parametrize("vol,days", [(3.0, 45), (0.25, 1), (3.0, 1), (0.01, 365)])
+@pytest.mark.parametrize("mu", [None, -0.5, 1.0])
+def test_results_are_finite_in_extreme_cases(key, vol, days, mu):
+    market = Market(underlying="Acción", spot=100.0, vol=vol, days=days, rate=0.04, q=0.01)
+    sim = SimulationSettings(n_paths=1_000, mu=mu)
+    result = simulate_scenario(market, template_legs(key, market), FEES, sim)
+    assert_all_finite(result)
+    assert 0.0 <= result.pop_mc <= 1.0
+    assert result.hist_counts.sum() == 1_000
+
+
+# --- AC-A9: rapidez ----------------------------------------------------
+
+
+def test_iron_condor_100k_paths_under_one_second():
+    legs = template_legs("iron_condor")
+    simulate_scenario(MARKET, legs, FEES, RISK_NEUTRAL)  # calentamiento
+    start = time.perf_counter()
+    simulate_scenario(MARKET, legs, FEES, RISK_NEUTRAL)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0

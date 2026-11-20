@@ -12,6 +12,7 @@ from opciones.models import (
     Leg,
     Market,
 )
+from opciones.metrics import Metrics, compute_metrics
 from opciones.payoff import pnl_expiry, pnl_today, position_greeks, price_grid
 from opciones.pricing import bs_greeks, bs_price, default_premium
 
@@ -22,8 +23,10 @@ __all__ = [
     "CommissionSettings",
     "Leg",
     "Market",
+    "Metrics",
     "bs_greeks",
     "bs_price",
+    "compute_metrics",
     "default_premium",
     "pnl_expiry",
     "pnl_today",

@@ -16,6 +16,14 @@ DAYS_PER_YEAR = 365
 # Un contrato de opción en EE. UU. controla 100 acciones.
 OPTION_MULTIPLIER = 100
 
+# Modelos de valoración antes del vencimiento (campo Market.pricing_model).
+# - "binomial": árbol CRR con ejercicio anticipado (americano) para Acción/ETF.
+# - "black_scholes": fórmula europea (la de la Etapa A).
+# Índice siempre se valora con Black-Scholes (es europeo).
+PRICING_BINOMIAL = "binomial"
+PRICING_BLACK_SCHOLES = "black_scholes"
+PRICING_MODELS = (PRICING_BINOMIAL, PRICING_BLACK_SCHOLES)
+
 
 @dataclass
 class Leg:
@@ -53,6 +61,9 @@ class Market:
     - days: días naturales hasta el vencimiento (común a todas las patas).
     - rate: tipo de interés libre de riesgo anual como fracción.
     - q: rentabilidad por dividendo anual como fracción (0 por defecto).
+    - pricing_model: modelo para valorar antes del vencimiento,
+      "binomial" (por defecto) o "black_scholes". Es el último campo para
+      que los Market(...) existentes, posicionales o por nombre, sigan valiendo.
     """
 
     underlying: str
@@ -61,6 +72,7 @@ class Market:
     days: float
     rate: float
     q: float = 0.0
+    pricing_model: str = PRICING_BINOMIAL
 
     @property
     def T(self) -> float:

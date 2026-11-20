@@ -10,7 +10,7 @@ metadata:
 
 # laboratorio-opciones - All Tests
 
-Last updated: 2026-11-20 (UPDATE PROCESS, MVP closeout)
+Last updated: 2026-11-20 (UPDATE PROCESS, Stage A closeout)
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
@@ -66,11 +66,11 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 
 ### Streamlit UI
 
-- `tests/test_app_smoke.py` uses `streamlit.testing.v1.AppTest` (loads the app, opens a catalog template, commission settings reach the result, days = 0 warns, vol = 0 errors with no chart, breakevens line shows all values). AppTest runs every tab body, so it does NOT prove cross-tab persistence or visual layout.
+- `tests/test_app_smoke.py` uses `streamlit.testing.v1.AppTest` (loads the app, opens a catalog template, commission settings reach the result, days = 0 warns, vol = 0 errors with no chart, breakevens line shows all values; Stage A: scenarios expander structure, IV button sets `vol_pct`, no "today" content in the expander, full expected-value label; 29 tests). AppTest runs every tab body, cannot clear a `number_input` to None, so it does NOT prove cross-tab persistence or visual layout.
 - Manual (user) checklist still covers visuals and cross-tab persistence of the Ajustes values: `.venv/bin/streamlit run app.py`.
 - The engine import must not pull in Streamlit: checked in a fresh subprocess in `tests/test_analyze.py`.
 
-### Test files (479 tests at MVP close)
+### Test files (910 tests at Stage A close)
 
 | File | Covers |
 |---|---|
@@ -81,7 +81,11 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 | `tests/test_validation.py` | blocking errors vs warnings, Spanish messages |
 | `tests/test_analyze.py` | `analyze()` end to end, no NaN, engine imports without Streamlit |
 | `tests/test_catalog.py` | 8 templates, `build_legs`, strike rounding tiers, book metrics per template |
+| `tests/test_implied_vol.py` | IV round trip (ATM/OTM/ITM, sigma 1 %-300 %, 1 and 45 days), bounds, premium 0, days 0, stock leg, never raises |
+| `tests/test_simulation.py` | exact PoP vs `scipy.integrate.quad`, N(d2) reference, PoP 0 and 1, Monte Carlo statistics, seed reproducibility, performance, exports |
 | `tests/test_app_smoke.py` | AppTest smoke of `app.py` |
+
+Notes: `test_validation.py` also covers `validate_simulation` and `scenario_warnings`; `test_analyze.py` checks that `opciones.implied_vol` and `opciones.simulation` import without Streamlit. Monte Carlo tests use tolerances of 4 standard errors and fixed seeds (deterministic, not flaky). Per-file commands: `.venv/bin/pytest tests/test_implied_vol.py -q`, `.venv/bin/pytest tests/test_simulation.py -q`.
 
 ## Default Verification Order
 
@@ -98,6 +102,7 @@ Unless the task clearly needs a different path:
 .venv/bin/pytest tests/test_metrics.py   # single file (see file table for the others)
 .venv/bin/pytest tests/test_app_smoke.py -q   # UI smoke (AppTest)
 .venv/bin/pytest -k bull_spread -v       # tests matching a name
+.venv/bin/pytest tests/test_simulation.py -q  # exact PoP + Monte Carlo (likewise test_implied_vol.py)
 ```
 
 One-time environment setup (already done; repeat only to rebuild `.venv/`):
@@ -116,11 +121,14 @@ python3 -m venv .venv
 
 - **Always use `.venv/bin/...`:** system Python has no numpy/pytest. Never `pip install --user` or `--break-system-packages`.
 - **Hand-computed commission cases:** the bull call spread 100@3 / 110@1 with default commissions has max loss -201.95 (just above S=100 the long call is strictly ITM and pays the 0.65 close fee); -201.30 is only P(100).
+- **Reference numbers:** recompute from INNOVATE prototypes with the exact inputs; the catalog iron condor exact PoP is 0.5721 at Market(100, 0.25, 45 d, 0.04, 0.01) with default commissions.
+- **Naming gotcha:** `from opciones import implied_vol` (the package attribute `opciones.implied_vol` is the function, not the module).
 - **Float comparisons:** use `pytest.approx` / `numpy.testing.assert_allclose` for prices and Greeks, never `==`.
 - **Imports:** run pytest from the repo root so `import opciones` resolves (`tests/__init__.py` exists).
 
 ## Known Gaps
 
 - Cross-tab persistence of the Ajustes values and visual layout have no automated test (AppTest cannot cover lazy tabs/visuals); verified manually by the user at MVP close.
+- Monte Carlo tests prove exactness against independent oracles, not that lognormal/Black-Scholes describe real markets (warnings only). Histogram clipping at percentiles 0.5-99.5 % is a presentation choice. No browser performance test (engine time only).
 - Market-data code (v2) will need mocked yfinance responses; not designed yet.
-- Resolved: engine tests exist (479); UI smoke test exists (former gap G3).
+- Resolved: engine tests exist (910 incl. Stage A); UI smoke test exists (former gap G3).

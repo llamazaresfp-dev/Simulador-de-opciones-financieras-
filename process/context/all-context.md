@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-20 (UPDATE PROCESS, MVP closeout)
+Last updated: 2026-11-20 (UPDATE PROCESS, Stage A closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,16 +145,18 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-MVP (v1) implemented. Layout:
+MVP (v1) and Stage A (Monte Carlo + implied volatility) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
   requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest)
-  app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes
+  app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes;
+                          "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación"
   opciones/            -- calculation engine (pure Python, no Streamlit imports, no I/O)
     __init__.py        -- public API: models, bs_price/bs_greeks/default_premium, validate_*, market_warnings,
-                          TEMPLATES/build_legs, analyze() -> Analysis
+                          TEMPLATES/build_legs, analyze() -> Analysis; Stage A additions: implied_vol, IVResult,
+                          SimulationSettings, ScenarioResult, simulate_scenario, validate_simulation, scenario_warnings
     models.py          -- Leg, Market, CommissionSettings, constants (MIN_VOL, OPTION_MULTIPLIER, DAYS_PER_YEAR)
     pricing.py         -- Black-Scholes price + Greeks, default_premium
     commissions.py     -- open_fee, close_fee_expiry, close_fee_today
@@ -162,9 +164,11 @@ laboratorio-opciones/
     metrics.py         -- exact max profit/loss, breakevens, "unlimited" detection (kink-based, no grid scan)
     validation.py      -- validate_market, validate_legs, market_warnings (Spanish messages)
     catalog.py         -- 8 strategy templates + build_legs
-  tests/               -- pytest suite (7 test files + __init__.py): test_pricing, test_legs_payoff,
+    implied_vol.py     -- implied_vol(leg, market) -> IVResult (brentq on Black-Scholes; Spanish messages, never raises)
+    simulation.py      -- exact_pop (lognormal closed form), SimulationSettings, simulate_scenario (Monte Carlo)
+  tests/               -- pytest suite (9 test files + __init__.py, 910 tests): test_pricing, test_legs_payoff,
                           test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
-                          test_app_smoke (AppTest)
+                          test_implied_vol, test_simulation, test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
   .claude/ .codex/ .agents/  -- harness agents and skills (managed, do not edit)
 ```
@@ -180,6 +184,14 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Premiums:** non-manual premiums are rewritten with the Black-Scholes value on every rerun; a manual edit sets `premium_manual` and is kept (button "↺ BS" resets, "↺ spot" resets the stock price).
 - **Breakevens** are rendered on their own markdown line (not `st.metric`, which truncates long values).
 - Backlog idea: charge the expiry close fee only if option value exceeds the fee -- `process/general-plans/backlog/close-fee-rational-close_20-11-26.md`.
+
+## Stage A Behaviours Worth Knowing
+
+- **Decisions A1-A11 (summary):** one lognormal terminal-price model; exact PoP (closed form over P&L > 0 intervals of `pnl_expiry`) shown next to the Monte Carlo PoP; risk-neutral drift `r - q` by default, optional user growth mu (-50 %..+100 %/yr, empty = neutral); n_paths integer 1,000..1,000,000 (default 100,000), seed integer 0..2^32-1 (default 42); expiry-only scope (nothing "today" in the scenarios block); expected value is undiscounted; IV only for option legs with a manual premium (button sets the global `vol_pct` via `on_click`); estimates and warnings are study aids, not advice. Full text: `process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/`.
+- **Reference value:** catalog iron condor exact PoP at Market('Acción', 100, 0.25, 45, 0.04, 0.01) with default commissions is 0.5721 (not 0.5323; that came from a prototype with different inputs).
+- **Histogram:** `_histogram` widens the range by 0.5 USD for constant/near-constant P&L (np.histogram would fail); displayed range is percentiles 0.5-99.5 %, statistics use all paths. `validate_simulation` rejects integers held as floats (1000.0).
+- **Naming gotcha:** `opciones/__init__.py` exports the function `implied_vol`, which shadows the submodule attribute `opciones.implied_vol`. Use `from opciones import implied_vol`; the module is reachable via `sys.modules['opciones.implied_vol']`. `exact_pop` is not exported in `__init__`; import it from `opciones.simulation`.
+- **Streamlit pitfalls:** `st.metric` truncates long labels/values (seen twice) -- keep long text in markdown/caption; change widget state only in `on_click` callbacks before render (else `StreamlitWidgetAlreadyInstantiatedError`).
 
 ## Technology Stack
 
@@ -226,12 +238,13 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 ## Open Questions / Outstanding Work
 
 - MVP (v1) complete and verified (plan archived in `process/general-plans/completed/mvp-laboratorio_20-11-26/`; AC1-AC18 met, 479 tests).
-- Next: roadmap v2 per `DISENO.md` (market data via yfinance, etc.) as a new plan.
-- Backlog: rational close fee at expiry (`process/general-plans/backlog/close-fee-rational-close_20-11-26.md`).
+- Stage A (Monte Carlo + implied volatility) complete and verified (`process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/`; AC-A1..AC-A17 met, 910 tests).
+- Next: Stage B per roadmap -- binomial model for American options; then roadmap v2 per `DISENO.md` (market data via yfinance, etc.) as new plans.
+- Backlog: rational close fee at expiry, to pair with Stage B (`process/general-plans/backlog/close-fee-rational-close_20-11-26.md`).
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20; refreshed at MVP closeout (HEAD 2c18510)
+- Generated: 2026-11-20; refreshed at Stage A closeout (HEAD f154272)
 - Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

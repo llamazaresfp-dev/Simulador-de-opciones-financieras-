@@ -2,17 +2,17 @@
 name: etapa-a-montecarlo-iv PLAN
 description: "Plan COMPLEX de la Etapa A (PoP exacta + Monte Carlo + volatilidad implícita) de Laboratorio de Opciones en 4 bloques secuenciales, cada uno terminado en pytest verde."
 date: 20-11-26
-status: planned
+status: completed
 complexity: complex
-spec: process/general-plans/active/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_SPEC_20-11-26.md
+spec: process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_SPEC_20-11-26.md
 ---
 
 # Plan: Etapa A — Monte Carlo + volatilidad implícita
 
 **Date**: 20-11-26
 **Complexity**: COMPLEX (un solo plan, un solo flujo de ejecución, 4 bloques secuenciales; no es phase program)
-**Status**: ⏳ PLANNED
-**SPEC bloqueado**: `process/general-plans/active/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_SPEC_20-11-26.md` (AC-A1..AC-A17, decisiones A1–A10, huecos A-G1..A-G6)
+**Status**: ✅ VERIFIED (Etapa A completa, archivada 20-11-26)
+**SPEC bloqueado**: `process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_SPEC_20-11-26.md` (AC-A1..AC-A17, decisiones A1–A10, huecos A-G1..A-G6)
 **Entorno**: Python 3.12.3, `.venv` (numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0); línea base: 479 tests en verde (HEAD 3fecb0f)
 
 **TL;DR:** se añaden dos módulos puros (`opciones/implied_vol.py`, `opciones/simulation.py`) y funciones de validación/avisos, todo con tests, en los bloques 1–3; solo el bloque 4 toca `app.py` (un desplegable "Escenarios (Monte Carlo)" bajo las métricas + ajustes de simulaciones/semilla). No se modifica `analyze()`, `Analysis`, `metrics.py` ni el comportamiento del MVP. Cada bloque cierra con `.venv/bin/pytest -q` completo en verde.
@@ -36,10 +36,10 @@ Contexto leído: `process/context/all-context.md`, `process/context/tests/all-te
 
 | Bloque | Contenido | Estado |
 |---|---|---|
-| 1 | `implied_vol.py` + mensajes de IV + `tests/test_implied_vol.py` | ⏳ PLANNED |
-| 2 | PoP exacta (`simulation.py`) + `tests/test_simulation.py` | ⏳ PLANNED |
-| 3 | Monte Carlo + `ScenarioResult` + `validate_simulation` / `scenario_warnings` + tests | ⏳ PLANNED |
-| 4 | UI `app.py` + smoke AppTest + pytest completo + checklist manual (ACs Hybrid) | ⏳ PLANNED |
+| 1 | `implied_vol.py` + mensajes de IV + `tests/test_implied_vol.py` | ✅ VERIFIED (d7606f2, 651 tests) |
+| 2 | PoP exacta (`simulation.py`) + `tests/test_simulation.py` | ✅ VERIFIED (55bdeea, 686 tests) |
+| 3 | Monte Carlo + `ScenarioResult` + `validate_simulation` / `scenario_warnings` + tests | ✅ VERIFIED (3a Monte Carlo d46eddb, 836; 3b validación/avisos/exportaciones 9853668, 887) |
+| 4 | UI `app.py` + smoke AppTest + pytest completo + checklist manual (ACs Hybrid) | ✅ VERIFIED (4a escenarios 9689b02, 900; 4b UI de IV + arreglo EVL f154272, 910) |
 
 ## Decisiones bloqueadas (A1–A11)
 
@@ -95,7 +95,7 @@ A phase is NOT complete until:
 
 1. **Integration Test** - el bloque funciona con los anteriores y con los 479 tests del MVP (`.venv/bin/pytest -q` completo)
 2. **Manual Test** - el usuario puede reproducir valores de referencia con `.venv/bin/python -c ...` (bloques 1–3) y la checklist manual (bloque 4)
-3. **Data Verification** - valores de referencia calculados a mano o por fórmula (0,3392; 0,5323; N(d2)) y oráculos independientes (`scipy.integrate.quad`)
+3. **Data Verification** - valores de referencia calculados a mano o por fórmula (0,3392; 0,5721; N(d2)) y oráculos independientes (`scipy.integrate.quad`)
 4. **Error Handling** - entradas inválidas devuelven mensajes en español, nunca NaN, infinitos ni excepciones hacia la UI
 5. **User Confirmation** - el usuario dice "funciona"
 
@@ -103,7 +103,7 @@ Status: ⏳ PLANNED · 🔨 CODE DONE · 🧪 TESTING · ✅ VERIFIED · 🚧 BL
 
 Regla honesta: un bloque con tests verdes y sin revisión del usuario es `🔨 CODE DONE`, no `✅ VERIFIED`. Solo el usuario pasa un bloque a `✅ VERIFIED`. **Lección del MVP:** vc-execute-agent no puede escribir bajo `process/`; las actualizaciones de estado de los bloques en este plan y el reporte se hacen en UPDATE PROCESS.
 
-Reporte por bloque (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/active/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_REPORT_20-11-26.md`.
+Reporte por bloque (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_REPORT_20-11-26.md`.
 
 ## Acceptance Criteria
 
@@ -164,46 +164,46 @@ Orden estricto; cada bloque termina con pytest verde. Reglas transversales: TDD 
 
 **Explicación para el usuario:** la volatilidad implícita responde a "¿qué volatilidad tendría que haber para que Black-Scholes diera exactamente esta prima?". Construimos esa calculadora (un buscador de raíces) y, antes de usarla, comprobamos que la prima tiene sentido (por ejemplo, una prima de 0,00 no da una IV "falsa"). Si no se puede calcular, devuelve un mensaje en español en lugar de un número raro o un error. Los tests comprueban la ida y vuelta: precio → IV → precio.
 
-- [ ] Ejecutar `date +%d-%m-%y` y `.venv/bin/python -c "import numpy, scipy, plotly, streamlit, pytest; print(numpy.__version__, scipy.__version__, plotly.__version__, streamlit.__version__, pytest.__version__)"`; confirmar línea base `.venv/bin/pytest -q` → 479 passed.
-- [ ] Crear `opciones/implied_vol.py`: dataclass `IVResult(vol, message)`; constantes de mensaje en español (pata de acción, días = 0, prima ≤ 0, prima por debajo del límite inferior sin arbitraje, prima por encima del límite superior, fallo del buscador); `implied_vol(leg, market)` con las comprobaciones en el orden: acción → días = 0 → prima ≤ 0 → límites estrictos (call/put con `e^(−qT)`, `e^(−rT)`) → `scipy.optimize.brentq(f, 1e-6, 10, xtol=1e-14, rtol=1e-14)` con `f(σ) = bs_price(...) − prima`; `ValueError` → mensaje; nunca lanza. Datos no numéricos (None, NaN) → mensaje.
-- [ ] Modificar `opciones/__init__.py`: exportar `implied_vol` e `IVResult` (añadir a `__all__`; sin tocar `analyze()`/`Analysis`).
-- [ ] Crear `tests/test_implied_vol.py` (primero en rojo): ida y vuelta en rejilla ATM/OTM/ITM × σ ∈ {1 %, 5 %, 25 %, 100 %, 300 %} × T = 1 día (y T = 45 d) × call/put con `bs_price(σ) → implied_vol → |iv − σ| ≤ 1e-9` (AC-A11); prima igual al precio del modelo con `market.vol` → `abs(iv − market.vol) < 1e-9`; prima 0 muy OTM → `vol is None` con mensaje de prima ≤ 0 (no devuelve 1e-6); prima justo en el límite inferior y por debajo (put ITM con prima < intrínseco descontado) → mensaje "por debajo"; prima ≥ límite superior (call con prima ≥ S·e^(−qT); put con prima ≥ K·e^(−rT)) → mensaje "por encima"; días = 0 → mensaje; pata de acción → mensaje; mensajes de los distintos casos son distintos entre sí; entradas con q > 0 y r ≠ 0; nunca lanza (NaN, None, strike 0); `vol` y `message` mutuamente excluyentes.
-- [ ] Comando: `.venv/bin/pytest tests/test_implied_vol.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Ejecutar `date +%d-%m-%y` y `.venv/bin/python -c "import numpy, scipy, plotly, streamlit, pytest; print(numpy.__version__, scipy.__version__, plotly.__version__, streamlit.__version__, pytest.__version__)"`; confirmar línea base `.venv/bin/pytest -q` → 479 passed.
+- [x] Crear `opciones/implied_vol.py`: dataclass `IVResult(vol, message)`; constantes de mensaje en español (pata de acción, días = 0, prima ≤ 0, prima por debajo del límite inferior sin arbitraje, prima por encima del límite superior, fallo del buscador); `implied_vol(leg, market)` con las comprobaciones en el orden: acción → días = 0 → prima ≤ 0 → límites estrictos (call/put con `e^(−qT)`, `e^(−rT)`) → `scipy.optimize.brentq(f, 1e-6, 10, xtol=1e-14, rtol=1e-14)` con `f(σ) = bs_price(...) − prima`; `ValueError` → mensaje; nunca lanza. Datos no numéricos (None, NaN) → mensaje.
+- [x] Modificar `opciones/__init__.py`: exportar `implied_vol` e `IVResult` (añadir a `__all__`; sin tocar `analyze()`/`Analysis`).
+- [x] Crear `tests/test_implied_vol.py` (primero en rojo): ida y vuelta en rejilla ATM/OTM/ITM × σ ∈ {1 %, 5 %, 25 %, 100 %, 300 %} × T = 1 día (y T = 45 d) × call/put con `bs_price(σ) → implied_vol → |iv − σ| ≤ 1e-9` (AC-A11); prima igual al precio del modelo con `market.vol` → `abs(iv − market.vol) < 1e-9`; prima 0 muy OTM → `vol is None` con mensaje de prima ≤ 0 (no devuelve 1e-6); prima justo en el límite inferior y por debajo (put ITM con prima < intrínseco descontado) → mensaje "por debajo"; prima ≥ límite superior (call con prima ≥ S·e^(−qT); put con prima ≥ K·e^(−rT)) → mensaje "por encima"; días = 0 → mensaje; pata de acción → mensaje; mensajes de los distintos casos son distintos entre sí; entradas con q > 0 y r ≠ 0; nunca lanza (NaN, None, strike 0); `vol` y `message` mutuamente excluyentes.
+- [x] Comando: `.venv/bin/pytest tests/test_implied_vol.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** todos los tests nuevos y los 479 del MVP verdes; ida y vuelta con error ≤ 1e-9; ningún camino de IV lanza una excepción.
 
 ### Bloque 2 — PoP exacta (AC-A1 parcial, AC-A2, AC-A3)
 
 **Explicación para el usuario:** la probabilidad de beneficio exacta se calcula sin simular nada: buscamos los precios donde el resultado de la estrategia cruza el cero (los breakevens) y los strikes, partimos el eje de precios en tramos, miramos en qué tramos se gana dinero y sumamos la probabilidad lognormal de cada uno. Para un call largo debe coincidir con la fórmula N(d2) del libro (0,3392 en el caso de referencia).
 
-- [ ] Crear `opciones/simulation.py`: constante `ZERO_TOL = 1e-7`; dataclass `SimulationSettings(n_paths=100_000, seed=42, mu=None)`; función `exact_pop(market, legs, settings, sim)` (pública dentro del módulo, usada por `simulate_scenario` en el bloque 3): `drift = mu` si no es `None`, si no `rate − q`; fronteras = `[0]` + strikes + `compute_metrics(...).breakevens` (únicos, ordenados); sondeo de `pnl_expiry` en el punto medio de cada intervalo y en `último + max(último, 1)` para la cola derecha; sumar `CDF(b) − CDF(a)` donde P&L > `ZERO_TOL`, cola derecha hasta 1; `CDF(0) = 0`; `CDF(x) = Φ((ln(x/S) − (drift − σ²/2)T)/(σ√T))`. Resultado acotado a [0, 1].
-- [ ] Crear `tests/test_simulation.py` (primero en rojo), parte PoP exacta: long call ATM S=100, σ=25 %, 45 días, r=4 %, q=1 % → `pytest.approx(0.3392, abs=5e-4)` y igual a N(d2) evaluada en el breakeven de `compute_metrics` (AC-A2, también long put con N(−d2)); long straddle, iron condor (0,5323), bull call spread, covered call y protective put vs integración independiente con `scipy.integrate.quad` de la densidad lognormal sobre `pnl_expiry > 0` (o rejilla densa como alternativa si `quad` es inestable en los saltos) con `abs=1e-6`; casos PoP = 0 (p. ej. short de beneficio imposible / comisiones que superan el beneficio) y PoP = 1 (estrategia siempre positiva); μ mayor → PoP del long call mayor (monotonía); modo neutral al riesgo usa `rate − q` y modo μ usa μ.
-- [ ] Comando: `.venv/bin/pytest tests/test_simulation.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Crear `opciones/simulation.py`: constante `ZERO_TOL = 1e-7`; dataclass `SimulationSettings(n_paths=100_000, seed=42, mu=None)`; función `exact_pop(market, legs, settings, sim)` (pública dentro del módulo, usada por `simulate_scenario` en el bloque 3): `drift = mu` si no es `None`, si no `rate − q`; fronteras = `[0]` + strikes + `compute_metrics(...).breakevens` (únicos, ordenados); sondeo de `pnl_expiry` en el punto medio de cada intervalo y en `último + max(último, 1)` para la cola derecha; sumar `CDF(b) − CDF(a)` donde P&L > `ZERO_TOL`, cola derecha hasta 1; `CDF(0) = 0`; `CDF(x) = Φ((ln(x/S) − (drift − σ²/2)T)/(σ√T))`. Resultado acotado a [0, 1].
+- [x] Crear `tests/test_simulation.py` (primero en rojo), parte PoP exacta: long call ATM S=100, σ=25 %, 45 días, r=4 %, q=1 % → `pytest.approx(0.3392, abs=5e-4)` y igual a N(d2) evaluada en el breakeven de `compute_metrics` (AC-A2, también long put con N(−d2)); long straddle, iron condor (0,5721; corregido en UPDATE PROCESS, ver Lessons Learned), bull call spread, covered call y protective put vs integración independiente con `scipy.integrate.quad` de la densidad lognormal sobre `pnl_expiry > 0` (o rejilla densa como alternativa si `quad` es inestable en los saltos) con `abs=1e-6`; casos PoP = 0 (p. ej. short de beneficio imposible / comisiones que superan el beneficio) y PoP = 1 (estrategia siempre positiva); μ mayor → PoP del long call mayor (monotonía); modo neutral al riesgo usa `rate − q` y modo μ usa μ.
+- [x] Comando: `.venv/bin/pytest tests/test_simulation.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** PoP exacta coincide con N(d2)/N(−d2) y con el oráculo independiente; extremos 0 y 1; 479 + nuevos verdes.
 
 ### Bloque 3 — Monte Carlo, `ScenarioResult`, validación y avisos (AC-A1, AC-A4, AC-A5, AC-A6, AC-A8, AC-A9, AC-A10, AC-A15, AC-A16)
 
 **Explicación para el usuario:** la simulación lanza 100 000 "precios finales" posibles con una semilla fija (42), calcula el resultado de la estrategia en cada uno y resume: histograma, media (valor esperado, sin descontar) y percentiles 5/50/95. Su probabilidad de ganar debe parecerse a la exacta (una comprobación cruzada). Además añadimos las reglas que rechazan entradas absurdas con mensajes en español y los avisos de limitaciones del modelo.
 
-- [ ] Modificar `opciones/simulation.py`: dataclass `ScenarioResult` y `simulate_scenario(market, legs, settings, sim)`: PoP exacta (bloque 2) + MC (`rng = np.random.default_rng(sim.seed)`, `z = rng.standard_normal(n)`, `S_T = S·exp((drift − σ²/2)T + σ√T·z)`, una llamada vectorizada `pnl_expiry`); `pop_mc = mean(pnl > ZERO_TOL)`; `mean_pnl`, `pnl_std`, `p5/p50/p95` con `np.percentile`; histograma ~50 bins sobre el P&L recortado a sus percentiles 0,5–99,5 % (bins de los extremos recogen las colas; suma = `n_paths`); `mu_used`; sin NaN/inf; sin caché, sin reducción de varianza.
-- [ ] Modificar `opciones/validation.py`: añadir `validate_simulation(market, legs, sim)` (usa las reglas de [Acceptance Criteria](#acceptance-criteria): reutiliza `validate_market`/`validate_legs`; días = 0 mensaje propio; n_paths/seed/μ según A11; nunca lanza) y `scenario_warnings(market)` (modelo ≠ predicción; colas más gruesas; Acción/ETF: americanas sesgan IV y simulación, Índice: europeas; "no es asesoría"). No modificar funciones existentes.
-- [ ] Modificar `opciones/__init__.py`: exportar `SimulationSettings`, `ScenarioResult`, `simulate_scenario`, `validate_simulation`, `scenario_warnings`.
-- [ ] Ampliar `tests/test_simulation.py`: misma semilla → resultados idénticos; semilla distinta cambia MC y no `pop_exact` (AC-A8); defaults 100 000 / 42; PoP MC vs exacta dentro de `4·√(p(1−p)/n)` en las estrategias del catálogo (`TEMPLATES` + `build_legs`) (AC-A4); `p5 ≤ p50 ≤ p95`, dentro de [pérdida máx., beneficio máx.] cuando son finitos, `hist_counts.sum() == n_paths` (AC-A5); EV del long call = `100·prima·(e^{rT} − 1) − open_fee − close_fee·P(S_T>K)` dentro de 4·EE de `pnl_std/√n` (AC-A6); media de `S_T` ≈ `S·e^{(r−q)T}` en modo neutral (AC-A1; test sobre las muestras o sobre el estimador equivalente a `ScenarioResult` si no se exponen las muestras: acordar en EXECUTE sin ampliar la API pública más de lo estrictamente necesario) y μ distinto cambia resultados; sin NaN/inf en ningún campo con casos extremos (σ alta, T = 1 día); rendimiento: iron condor con 100 000 trayectorias en < 1 s (AC-A9).
-- [ ] Ampliar `tests/test_validation.py`: `validate_simulation` rechaza n_paths = 999, 1_000_001, 1.5, "a", True; seed = −1, 2³², 1.5, True; μ = −0,51, 1,01, NaN, inf, "a"; acepta límites 1 000, 1 000 000, 0, 2³²−1, μ = −0,5 y 1,0 y `None`; días = 0, vol = 0 (mensaje existente de `validate_market`), sin patas; lista vacía en caso válido; `scenario_warnings` por subyacente (Acción/ETF americanas, Índice europeas, siempre modelo/colas/no es asesoría) (AC-A15).
-- [ ] Ampliar `tests/test_analyze.py` (subproceso): `import opciones, opciones.implied_vol, opciones.simulation, sys; assert 'streamlit' not in sys.modules` con `subprocess.run([sys.executable, "-c", ...], check=True, cwd=REPO_ROOT)` (AC-A16).
-- [ ] Comando: `.venv/bin/pytest tests/test_simulation.py tests/test_validation.py tests/test_analyze.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Modificar `opciones/simulation.py`: dataclass `ScenarioResult` y `simulate_scenario(market, legs, settings, sim)`: PoP exacta (bloque 2) + MC (`rng = np.random.default_rng(sim.seed)`, `z = rng.standard_normal(n)`, `S_T = S·exp((drift − σ²/2)T + σ√T·z)`, una llamada vectorizada `pnl_expiry`); `pop_mc = mean(pnl > ZERO_TOL)`; `mean_pnl`, `pnl_std`, `p5/p50/p95` con `np.percentile`; histograma ~50 bins sobre el P&L recortado a sus percentiles 0,5–99,5 % (bins de los extremos recogen las colas; suma = `n_paths`); `mu_used`; sin NaN/inf; sin caché, sin reducción de varianza.
+- [x] Modificar `opciones/validation.py`: añadir `validate_simulation(market, legs, sim)` (usa las reglas de [Acceptance Criteria](#acceptance-criteria): reutiliza `validate_market`/`validate_legs`; días = 0 mensaje propio; n_paths/seed/μ según A11; nunca lanza) y `scenario_warnings(market)` (modelo ≠ predicción; colas más gruesas; Acción/ETF: americanas sesgan IV y simulación, Índice: europeas; "no es asesoría"). No modificar funciones existentes.
+- [x] Modificar `opciones/__init__.py`: exportar `SimulationSettings`, `ScenarioResult`, `simulate_scenario`, `validate_simulation`, `scenario_warnings`.
+- [x] Ampliar `tests/test_simulation.py`: misma semilla → resultados idénticos; semilla distinta cambia MC y no `pop_exact` (AC-A8); defaults 100 000 / 42; PoP MC vs exacta dentro de `4·√(p(1−p)/n)` en las estrategias del catálogo (`TEMPLATES` + `build_legs`) (AC-A4); `p5 ≤ p50 ≤ p95`, dentro de [pérdida máx., beneficio máx.] cuando son finitos, `hist_counts.sum() == n_paths` (AC-A5); EV del long call = `100·prima·(e^{rT} − 1) − open_fee − close_fee·P(S_T>K)` dentro de 4·EE de `pnl_std/√n` (AC-A6); media de `S_T` ≈ `S·e^{(r−q)T}` en modo neutral (AC-A1; test sobre las muestras o sobre el estimador equivalente a `ScenarioResult` si no se exponen las muestras: acordar en EXECUTE sin ampliar la API pública más de lo estrictamente necesario) y μ distinto cambia resultados; sin NaN/inf en ningún campo con casos extremos (σ alta, T = 1 día); rendimiento: iron condor con 100 000 trayectorias en < 1 s (AC-A9).
+- [x] Ampliar `tests/test_validation.py`: `validate_simulation` rechaza n_paths = 999, 1_000_001, 1.5, "a", True; seed = −1, 2³², 1.5, True; μ = −0,51, 1,01, NaN, inf, "a"; acepta límites 1 000, 1 000 000, 0, 2³²−1, μ = −0,5 y 1,0 y `None`; días = 0, vol = 0 (mensaje existente de `validate_market`), sin patas; lista vacía en caso válido; `scenario_warnings` por subyacente (Acción/ETF americanas, Índice europeas, siempre modelo/colas/no es asesoría) (AC-A15).
+- [x] Ampliar `tests/test_analyze.py` (subproceso): `import opciones, opciones.implied_vol, opciones.simulation, sys; assert 'streamlit' not in sys.modules` con `subprocess.run([sys.executable, "-c", ...], check=True, cwd=REPO_ROOT)` (AC-A16).
+- [x] Comando: `.venv/bin/pytest tests/test_simulation.py tests/test_validation.py tests/test_analyze.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** todo verde; PoP MC dentro de 4 EE del valor exacto en todo el catálogo; sin NaN/inf; rendimiento < 1 s; `requirements.txt` sin diff.
 
 ### Bloque 4 — Interfaz, smoke tests y revisión manual (AC-A5..A7, AC-A8, AC-A10, AC-A13, AC-A14, AC-A15, AC-A17; Hybrid)
 
 **Explicación para el usuario:** en la pestaña Constructor, bajo las métricas, aparece un desplegable "Escenarios (Monte Carlo)" con la PoP exacta y la simulada una al lado de la otra, el histograma del resultado, el valor esperado (marcado "no descontado") y los percentiles. Para cada pata cuya prima editaste a mano verás su volatilidad implícita y un botón para usarla como volatilidad global (con el aviso de que eso cambia todas las primas automáticas y la curva "hoy"). El número de simulaciones y la semilla se editan en Ajustes. Al final te pido revisar a mano lo visual.
 
-- [ ] Antes de escribir: comprobación de solo lectura con `.venv/bin/python -c` (o AppTest mínimo) de que en streamlit 1.67 `st.number_input(value=None)` deja el campo vacío y devuelve `None`; si no se comporta así, fallback documentado: `st.text_input` con parseo a número y mensaje de error en español.
-- [ ] Modificar `app.py`: constantes de colores existentes reutilizadas (`COLOR_EXPIRY`, `COLOR_NEUTRAL`, `COLOR_BREAKEVEN`); `init_state` añade `mu_pct = None`, `n_sims = 100_000`, `seed = 42` con `setdefault`; funciones `sim_settings_from_state()` (μ en % → fracción) y `copy_setting` ya existente para `n_sims`/`seed` (widgets `n_sims_input`/`seed_input` en `render_settings`, sección nueva "Simulación (Etapa A)"), μ en el desplegable con patrón `mu_pct` + `mu_pct_input` (callback de copia).
-- [ ] En `render_builder`, rama de estrategia válida, tras `render_greeks(...)`: `render_scenarios(market, legs)` con `st.expander("Escenarios (Monte Carlo)")`: validar con `validate_simulation`; si hay errores, `st.error` por cada uno y sin resultados; si no, `simulate_scenario(...)`; mostrar PoP exacta y PoP simulada lado a lado (`st.metric`), etiqueta del escenario (neutral al riesgo / μ del usuario), "Valor esperado (no descontado)", p5/p50/p95, histograma plotly (colores del MVP, línea en cero, pie de figura indicando que los extremos acumulan las colas), `scenario_warnings` visibles. Sin controles ni resultados "hoy" (AC-A7).
-- [ ] Subsección IV dentro del desplegable: para cada pata con `premium_manual` de tipo opción: `implied_vol(leg, market)`; si `vol` → caption con la IV en % y `st.button("Usar como volatilidad global", key=f"use_iv_{leg_id}", on_click=use_iv_as_global, args=(iv,))` donde el callback hace `st.session_state["vol_pct"] = round(iv * 100, 2)` (en callback, **antes** de renderizar el widget; fijarlo después del render lanza `StreamlitWidgetAlreadyInstantiatedError`); si `message`, mostrarlo. Texto prominente (`st.warning`) junto a los botones: cambia todas las primas automáticas y la curva "hoy"; una σ global no encaja con todos los strikes. Las primas no manuales y "hoy" se recalculan con `refresh_auto_prices` existente (sin lógica nueva).
-- [ ] Ampliar `tests/test_app_smoke.py` (AppTest): el desplegable "Escenarios (Monte Carlo)" existe bajo las métricas y solo en la rama válida (no hay desplegable con errores de mercado/patas); la etiqueta contiene "(no descontado)"; no hay "hoy" dentro del desplegable (AC-A7); IV: con pata `premium_manual` aparece el botón `use_iv_{leg_id}`, al pulsarlo `session_state["vol_pct"]` toma `round(iv*100, 2)` y los resultados (p. ej. PoP) se recalculan; sin patas manuales no hay botón; mensaje de IV cuando prima fuera de límites; ajustes de `n_sims`/`seed` inválidos muestran mensaje en español sin excepción; días = 0 muestra mensaje de escenarios; MVP intacto (los smoke tests existentes siguen en verde).
-- [ ] Ejecutar gate completo: `.venv/bin/pytest tests/test_app_smoke.py -q` y luego `.venv/bin/pytest -q` (479 + nuevos, todo verde); `git diff requirements.txt` vacío (AC-A16).
-- [ ] **Checklist manual para el usuario** (`.venv/bin/streamlit run app.py`; cubre los ACs Hybrid): (1) el desplegable aparece bajo las métricas y no mueve gráfico/métricas/griegas (AC-A14); (2) PoP exacta y simulada visibles lado a lado y parecidas (AC-A4/A5); (3) histograma legible con línea en cero y pie explicando los extremos (AC-A5); (4) "Valor esperado (no descontado)" visible; percentiles p5/p50/p95 (AC-A6); (5) cambiar n_sims y semilla en Ajustes cambia el resultado simulado y no la PoP exacta; mismos valores → mismo resultado (AC-A8); (6) valores inválidos (n_sims = 500, semilla −1, μ = 150) muestran mensajes claros (AC-A10); (7) editar la prima de una pata → IV visible y botón "Usar como volatilidad global"; prima 0 o fuera de límites → mensaje claro (AC-A11/A12); (8) pulsar el botón cambia σ en la barra lateral, las primas automáticas y la curva "hoy", y el texto de aviso es prominente (AC-A13); (9) avisos de modelo/colas/americanas/no es asesoría visibles (AC-A15); (10) la persistencia entre pestañas (Catálogo/Constructor/Ajustes) conserva μ, n_sims y semilla (hueco A-G6, solo manual).
+- [x] Antes de escribir: comprobación de solo lectura con `.venv/bin/python -c` (o AppTest mínimo) de que en streamlit 1.67 `st.number_input(value=None)` deja el campo vacío y devuelve `None`; si no se comporta así, fallback documentado: `st.text_input` con parseo a número y mensaje de error en español.
+- [x] Modificar `app.py`: constantes de colores existentes reutilizadas (`COLOR_EXPIRY`, `COLOR_NEUTRAL`, `COLOR_BREAKEVEN`); `init_state` añade `mu_pct = None`, `n_sims = 100_000`, `seed = 42` con `setdefault`; funciones `sim_settings_from_state()` (μ en % → fracción) y `copy_setting` ya existente para `n_sims`/`seed` (widgets `n_sims_input`/`seed_input` en `render_settings`, sección nueva "Simulación (Etapa A)"), μ en el desplegable con patrón `mu_pct` + `mu_pct_input` (callback de copia).
+- [x] En `render_builder`, rama de estrategia válida, tras `render_greeks(...)`: `render_scenarios(market, legs)` con `st.expander("Escenarios (Monte Carlo)")`: validar con `validate_simulation`; si hay errores, `st.error` por cada uno y sin resultados; si no, `simulate_scenario(...)`; mostrar PoP exacta y PoP simulada lado a lado (`st.metric`), etiqueta del escenario (neutral al riesgo / μ del usuario), "Valor esperado (no descontado)", p5/p50/p95, histograma plotly (colores del MVP, línea en cero, pie de figura indicando que los extremos acumulan las colas), `scenario_warnings` visibles. Sin controles ni resultados "hoy" (AC-A7).
+- [x] Subsección IV dentro del desplegable: para cada pata con `premium_manual` de tipo opción: `implied_vol(leg, market)`; si `vol` → caption con la IV en % y `st.button("Usar como volatilidad global", key=f"use_iv_{leg_id}", on_click=use_iv_as_global, args=(iv,))` donde el callback hace `st.session_state["vol_pct"] = round(iv * 100, 2)` (en callback, **antes** de renderizar el widget; fijarlo después del render lanza `StreamlitWidgetAlreadyInstantiatedError`); si `message`, mostrarlo. Texto prominente (`st.warning`) junto a los botones: cambia todas las primas automáticas y la curva "hoy"; una σ global no encaja con todos los strikes. Las primas no manuales y "hoy" se recalculan con `refresh_auto_prices` existente (sin lógica nueva).
+- [x] Ampliar `tests/test_app_smoke.py` (AppTest): el desplegable "Escenarios (Monte Carlo)" existe bajo las métricas y solo en la rama válida (no hay desplegable con errores de mercado/patas); la etiqueta contiene "(no descontado)"; no hay "hoy" dentro del desplegable (AC-A7); IV: con pata `premium_manual` aparece el botón `use_iv_{leg_id}`, al pulsarlo `session_state["vol_pct"]` toma `round(iv*100, 2)` y los resultados (p. ej. PoP) se recalculan; sin patas manuales no hay botón; mensaje de IV cuando prima fuera de límites; ajustes de `n_sims`/`seed` inválidos muestran mensaje en español sin excepción; días = 0 muestra mensaje de escenarios; MVP intacto (los smoke tests existentes siguen en verde).
+- [x] Ejecutar gate completo: `.venv/bin/pytest tests/test_app_smoke.py -q` y luego `.venv/bin/pytest -q` (479 + nuevos, todo verde); `git diff requirements.txt` vacío (AC-A16).
+- [x] **Checklist manual para el usuario** (`.venv/bin/streamlit run app.py`; cubre los ACs Hybrid): (1) el desplegable aparece bajo las métricas y no mueve gráfico/métricas/griegas (AC-A14); (2) PoP exacta y simulada visibles lado a lado y parecidas (AC-A4/A5); (3) histograma legible con línea en cero y pie explicando los extremos (AC-A5); (4) "Valor esperado (no descontado)" visible; percentiles p5/p50/p95 (AC-A6); (5) cambiar n_sims y semilla en Ajustes cambia el resultado simulado y no la PoP exacta; mismos valores → mismo resultado (AC-A8); (6) valores inválidos (n_sims = 500, semilla −1, μ = 150) muestran mensajes claros (AC-A10); (7) editar la prima de una pata → IV visible y botón "Usar como volatilidad global"; prima 0 o fuera de límites → mensaje claro (AC-A11/A12); (8) pulsar el botón cambia σ en la barra lateral, las primas automáticas y la curva "hoy", y el texto de aviso es prominente (AC-A13); (9) avisos de modelo/colas/americanas/no es asesoría visibles (AC-A15); (10) la persistencia entre pestañas (Catálogo/Constructor/Ajustes) conserva μ, n_sims y semilla (hueco A-G6, solo manual).
 - **Pass criteria:** pytest completo verde; checklist manual aprobada por el usuario antes de marcar el bloque `✅ VERIFIED`.
 
 ## Verification Evidence
@@ -284,9 +284,9 @@ Sin dependencias nuevas: numpy 2.5.5 (`default_rng`), scipy 1.18.1 (`brentq`, `n
 
 ## Resume and Execution Handoff
 
-1. **Plan file:** `process/general-plans/active/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_PLAN_20-11-26.md` (execute-anchor).
-2. **Last completed phase/step:** PLAN escrito (todos los bloques ⏳ PLANNED); ningún código tocado.
-3. **Validate-contract status:** pending (lo escribe vc-validate-agent antes de EXECUTE).
+1. **Plan file:** `process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/etapa-a-montecarlo-iv_PLAN_20-11-26.md` (execute-anchor).
+2. **Last completed phase/step:** TODOS los bloques ✅ VERIFIED; plan archivado en `completed/` (ver Current Execution State).
+3. **Validate-contract status:** PASS (ver Validate Contract; enmiendas A1-A8 vinculantes).
 4. **Supporting context files loaded:** SPEC de la Etapa A; `process/context/all-context.md`; `process/context/tests/all-tests.md`; `process/development-protocols/plan-lifecycle.md`; `implementation-standards.md`; `opciones/*.py`; `app.py`; `tests/test_app_smoke.py`; `tests/test_analyze.py`.
 5. **Next step for a fresh agent:** tras VALIDATE, ejecutar el bloque 1 (TDD: `tests/test_implied_vol.py` en rojo → `opciones/implied_vol.py`), gate `.venv/bin/pytest tests/test_implied_vol.py -q` y luego `.venv/bin/pytest -q`; no empezar un bloque con el anterior en rojo; marcar `CODE DONE`, nunca `VERIFIED` sin confirmación del usuario. Nota: vc-execute-agent no puede escribir bajo `process/`; los estados de bloque y el reporte se actualizan en UPDATE PROCESS.
 
@@ -371,8 +371,32 @@ Plan updates applied: none by the validate agent (role writes only the contract)
 Gate: PASS
 Accepted by: n/a - no FAILs; CONCERNs C1-C7 (IV sigma tolerance, oracle tolerance, EV test power, mu clearing, widget min/max, ZERO_TOL duplication, block size) are resolved by binding amendments A1-A8 inside this contract.
 
+## Current Execution State
+
+**COMPLETE (20-11-26).** Los bloques 1, 2, 3a, 3b, 4a y 4b están implementados, cada uno confirmado por una ejecución EVL independiente de vc-tester y aprobado por el usuario; checklist manual de 11 ítems completada por el usuario ("Todo bien"). AC-A1..AC-A17 cumplidos. Suite final: 910/910, smoke AppTest 29/29, `requirements.txt` sin cambios, módulos del MVP intactos.
+
+| Bloque | Commit | Tests acumulados |
+|---|---|---|
+| 1 (IV) | d7606f2 | 651 |
+| 2 (PoP exacta) | 55bdeea | 686 |
+| 3a (Monte Carlo) | d46eddb | 836 |
+| 3b (validación/avisos/exportaciones) | 9853668 | 887 |
+| 4a (UI de escenarios) | 9689b02 | 900 |
+| 4b (UI de IV + arreglo EVL) | f154272 | 910 |
+
+SPEC/plan: f94f9b0. PVL: Gate PASS en la primera pasada con enmiendas vinculantes A1–A8 (A7 dividió los bloques 3 y 4 en 3a/3b y 4a/4b).
+
+## Lessons Learned and Deviations (UPDATE PROCESS)
+
+- **Corrección numérica del plan:** la PoP exacta del iron condor del catálogo con Market('Acción', 100, 0.25, 45, 0.04, 0.01) y comisiones por defecto es **0,5721** (exact_pop 0,572122; la forma cerrada y 1M de muestras MC coinciden), no 0,5323. Ese 0,5323 venía de un prototipo de INNOVATE con otras entradas (probablemente σ≈20 %, 90 días). Texto del plan corregido; las menciones históricas en el Validate Contract no se tocaron. Lección: las cifras de referencia de prototipos de INNOVATE deben recalcularse en PLAN/VALIDATE con las entradas exactas.
+- **Desviaciones aceptadas:** `_histogram` ensancha el rango ±0,5 USD cuando el P&L es constante o casi constante (np.histogram fallaba); `MSG_INVALID_DATA` en `implied_vol`; `exact_pop` no se exporta en `__init__` (no está en Public Contracts; se importa de `opciones.simulation`); `validate_simulation` rechaza enteros guardados como float (1000.0); 3 smoke tests del MVP ajustados en 4a (número de gráficos 1→2; días=0 ahora muestra el error del escenario), juzgado legítimo por EVL; helper `leg_from_dict` en `app.py`.
+- **EVL ciclo 1 (bloque 4b):** la etiqueta "Valor esperado (no descontado)" de `st.metric` se truncaba → pasó a su propia fila con caption; el smoke test "sin hoy" se acotó a resultados/métricas/gráficos/entradas (avisos excluidos) más una variante con pata manual. Arreglo aprobado por el usuario: se eliminó el aviso "no es asesoría" duplicado del desplegable de escenarios.
+- **Lecciones:** `st.metric` trunca etiquetas/valores largos (visto dos veces: breakevens del MVP, etiqueta de VE aquí) → el texto largo va en markdown/caption; el estado de widgets de Streamlit solo se cambia con callbacks `on_click` antes del render (si no, `StreamlitWidgetAlreadyInstantiatedError`); AppTest ejecuta todas las pestañas y no puede vaciar un `number_input` a None.
+- **Trampa de nombres:** `opciones/__init__.py` exporta la función `implied_vol`, que oculta el atributo de submódulo `opciones.implied_vol`; usar `from opciones import implied_vol`; el módulo está en `sys.modules['opciones.implied_vol']`.
+- **Backlog:** `process/general-plans/backlog/close-fee-rational-close_20-11-26.md` se mantiene (Etapa B).
+
 ## Next Step
 
-ENTER VALIDATE MODE (vc-validate-agent escribe el Validate Contract) y después ENTER EXECUTE MODE con el bloque 1. Cursor Plan mode: abrir este plan y ejecutar los bloques en orden.
+Etapa A cerrada. Siguiente: Etapa B según el roadmap (modelo binomial para opciones americanas) y, junto a ella, el ítem de backlog de comisión de cierre racional.
 
-PHASE_COMPLETE: PLAN
+PHASE_COMPLETE: UPDATE PROCESS

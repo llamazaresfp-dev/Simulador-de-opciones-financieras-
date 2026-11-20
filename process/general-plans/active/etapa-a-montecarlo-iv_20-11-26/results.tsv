@@ -1,2 +1,4 @@
 iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
 0	2026-11-20	8	0	8	8	SATURATED	HALTED_SUCCESS	outer PVL first pass: Gate PASS; 8 concerns resolved as binding contract amendments A1-A8 (no supplement cycle)
+1	2026-11-20	2	1	1	2	ACTIVE	CONTINUE	EVL block 4b cycle 1: EV label truncated (AC-A6), narrow no-hoy smoke test (AC-A7)
+2	2026-11-20	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL re-run after fix: smoke 29/29, suite 910/910, EV label full, no-hoy test narrowed

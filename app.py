@@ -30,6 +30,7 @@ from opciones import (
     analyze,
     build_legs,
     default_premium,
+    implied_vol,
     market_warnings,
     scenario_warnings,
     simulate_scenario,
@@ -37,6 +38,7 @@ from opciones import (
     validate_market,
     validate_simulation,
 )
+from opciones.validation import MSG_NOT_ADVICE
 
 TAB_NAMES = ["Catálogo", "Constructor", "Ajustes"]
 
@@ -179,13 +181,15 @@ def sim_settings_from_state() -> SimulationSettings:
     )
 
 
+def leg_from_dict(item: dict) -> Leg:
+    """Convierte el diccionario de una pata en un objeto Leg del motor."""
+    strike = None if item["kind"] == "stock" else item["strike"]
+    return Leg(item["kind"], item["side"], item["quantity"], strike, item["price"])
+
+
 def legs_from_state() -> list[Leg]:
     """Convierte los diccionarios de patas en objetos Leg del motor."""
-    legs = []
-    for item in st.session_state["legs"]:
-        strike = None if item["kind"] == "stock" else item["strike"]
-        legs.append(Leg(item["kind"], item["side"], item["quantity"], strike, item["price"]))
-    return legs
+    return [leg_from_dict(item) for item in st.session_state["legs"]]
 
 
 def refresh_auto_prices(market: Market) -> None:
@@ -268,6 +272,20 @@ def open_template(template_key: str) -> None:
     st.session_state["legs"] = legs
     # Cambiar el valor de la clave de las pestañas selecciona otra pestaña.
     st.session_state["main_tab"] = "Constructor"
+
+
+def use_iv_as_global(vol_pct: float) -> None:
+    """Botón "Usar como volatilidad global": pone la IV en la barra lateral.
+
+    Tiene que ser un callback (on_click). Streamlit lo ejecuta ANTES del
+    rerun, cuando el widget "Volatilidad anual (%)" (clave `vol_pct`) aún
+    no se ha dibujado. Si cambiáramos `st.session_state["vol_pct"]` después
+    de dibujar ese widget, Streamlit lanzaría un error
+    (StreamlitWidgetAlreadyInstantiatedError).
+    En el rerun, refresh_auto_prices recalcula con la nueva σ las primas
+    automáticas y la curva «hoy» (no hace falta lógica nueva).
+    """
+    st.session_state["vol_pct"] = vol_pct
 
 
 def copy_setting(field: str) -> None:
@@ -559,8 +577,12 @@ def render_scenarios(market: Market, legs: list[Leg]) -> None:
         else:
             result = simulate_scenario(market, legs, settings_from_state(), sim)
             render_scenario_results(result, sim)
+        render_implied_vols(market)
         for message in scenario_warnings(market):
-            st.info(message)
+            # El aviso "no es asesoría" ya sale en el pie de la página y en los
+            # avisos generales justo debajo: aquí lo saltamos para no repetirlo.
+            if message != MSG_NOT_ADVICE:
+                st.info(message)
 
 
 def render_mu_input() -> None:
@@ -605,21 +627,73 @@ def render_scenario_results(result, sim: SimulationSettings) -> None:
     st.caption(f"PoP simulada con {n_paths} simulaciones (semilla {sim.seed}).")
 
     st.markdown("**P&L simulado al vencimiento**")
-    cols = st.columns(4)
-    cols[0].metric("Valor esperado (no descontado)", format_usd(result.mean_pnl))
-    cols[1].metric("Percentil 5", format_usd(result.p5))
-    cols[2].metric("Mediana (p50)", format_usd(result.p50))
-    cols[3].metric("Percentil 95", format_usd(result.p95))
+    # El valor esperado va en su propia fila: en una fila de 4 columnas
+    # st.metric recortaba la etiqueta y no se leía «no descontado».
+    st.metric("Valor esperado (no descontado)", format_usd(result.mean_pnl))
     st.caption(
-        "El valor esperado es la media del P&L al vencimiento, sin descontar: "
-        "no es un precio justo."
+        "Valor esperado no descontado: es la media del P&L al vencimiento, "
+        "sin descontar. No es un precio justo."
     )
+    cols = st.columns(3)
+    cols[0].metric("Percentil 5", format_usd(result.p5))
+    cols[1].metric("Mediana (p50)", format_usd(result.p50))
+    cols[2].metric("Percentil 95", format_usd(result.p95))
 
     st.plotly_chart(build_histogram(result), width="stretch")
     st.caption(
         "Las barras de los extremos acumulan las colas: incluyen todas las "
         "simulaciones por debajo del percentil 0,5 % (primera barra) y por "
         "encima del 99,5 % (última barra)."
+    )
+
+
+def manual_option_legs() -> list[tuple[int, dict]]:
+    """Patas de opción con prima escrita a mano, con su número de fila.
+
+    Solo estas tienen IV: las primas automáticas salen de la σ global,
+    así que su IV sería esa misma σ. Las acciones no tienen IV.
+    """
+    found = []
+    for number, item in enumerate(st.session_state["legs"], start=1):
+        if item["premium_manual"] and item["kind"] != "stock":
+            found.append((number, item))
+    return found
+
+
+def render_implied_vols(market: Market) -> None:
+    """Volatilidad implícita de cada pata con prima manual (y su botón).
+
+    Si no hay patas de opción con prima manual, no se dibuja nada.
+    """
+    manual_legs = manual_option_legs()
+    if not manual_legs:
+        return
+
+    st.markdown("**Volatilidad implícita (IV) de las primas manuales**")
+    st.warning(
+        "Atención: «Usar como volatilidad global» cambia la volatilidad de la "
+        "barra lateral, y con ella TODAS las primas automáticas y la curva «hoy». "
+        "Una sola σ global no encaja con todos los strikes: cada prima de "
+        "mercado puede tener su propia IV."
+    )
+    for number, item in manual_legs:
+        render_leg_iv(number, item, market)
+
+
+def render_leg_iv(number: int, item: dict, market: Market) -> None:
+    """IV de una pata: el valor en % con su botón, o el mensaje si no existe."""
+    name = f"Pata {number} ({KIND_LABELS[item['kind']]}, strike {item['strike']:.2f})"
+    result = implied_vol(leg_from_dict(item), market)
+    if result.vol is None:
+        st.caption(f"{name}: {result.message}")
+        return
+    vol_pct = round(result.vol * 100, 2)
+    st.caption(f"{name}: volatilidad implícita {vol_pct:.2f} %")
+    st.button(
+        "Usar como volatilidad global",
+        key=f"use_iv_{item['id']}",
+        on_click=use_iv_as_global,
+        args=(vol_pct,),
     )
 
 

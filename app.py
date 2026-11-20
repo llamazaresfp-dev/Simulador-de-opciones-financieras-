@@ -26,12 +26,16 @@ from opciones import (
     CommissionSettings,
     Leg,
     Market,
+    SimulationSettings,
     analyze,
     build_legs,
     default_premium,
     market_warnings,
+    scenario_warnings,
+    simulate_scenario,
     validate_legs,
     validate_market,
+    validate_simulation,
 )
 
 TAB_NAMES = ["Catálogo", "Constructor", "Ajustes"]
@@ -63,6 +67,8 @@ MARKET_DEFAULTS = {
     "q_pct": 0.0,
 }
 SETTINGS_DEFAULTS = CommissionSettings()
+# Valores iniciales de la simulación (100 000 trayectorias, semilla 42, μ vacío).
+SIMULATION_DEFAULTS = SimulationSettings()
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +90,15 @@ def init_state() -> None:
     st.session_state.setdefault("per_contract", SETTINGS_DEFAULTS.per_contract)
     st.session_state.setdefault("index_surcharge", SETTINGS_DEFAULTS.index_surcharge)
     st.session_state.setdefault("include_close", SETTINGS_DEFAULTS.include_close)
+
+    # Simulación (Etapa A): también entradas simples, por la misma razón.
+    # Las pestañas de Streamlit son "perezosas": si un widget no se dibuja
+    # en un rerun, Streamlit borra su valor. Guardando el dato en una clave
+    # propia (sin widget) no se pierde al cambiar de pestaña.
+    # mu_pct = None significa "vacío" = escenario neutral al riesgo.
+    st.session_state.setdefault("n_sims", SIMULATION_DEFAULTS.n_paths)
+    st.session_state.setdefault("seed", SIMULATION_DEFAULTS.seed)
+    st.session_state.setdefault("mu_pct", None)
 
     st.session_state.setdefault("main_tab", "Catálogo")
 
@@ -148,6 +163,19 @@ def settings_from_state() -> CommissionSettings:
         per_contract=st.session_state["per_contract"],
         index_surcharge=st.session_state["index_surcharge"],
         include_close=st.session_state["include_close"],
+    )
+
+
+def sim_settings_from_state() -> SimulationSettings:
+    """Ajustes de la simulación leídos de session_state.
+
+    μ se escribe en % y el motor lo quiere como fracción (5 % -> 0.05);
+    si el campo está vacío queda None (= neutral al riesgo).
+    """
+    return SimulationSettings(
+        n_paths=st.session_state["n_sims"],
+        seed=st.session_state["seed"],
+        mu=percent_to_fraction(st.session_state["mu_pct"]),
     )
 
 
@@ -243,7 +271,7 @@ def open_template(template_key: str) -> None:
 
 
 def copy_setting(field: str) -> None:
-    """Copia un widget de Ajustes a su entrada simple de session_state."""
+    """Copia un widget (Ajustes o μ) a su entrada simple de session_state."""
     st.session_state[field] = st.session_state[f"{field}_input"]
 
 
@@ -333,6 +361,8 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
         st.plotly_chart(build_chart(analysis, market), width="stretch")
         render_metrics(analysis)
         render_greeks(analysis.greeks)
+        # Escenarios (Etapa A): debajo de lo del MVP, sin moverlo ni cambiarlo.
+        render_scenarios(market, legs)
 
     render_notices(market)
 
@@ -503,6 +533,124 @@ def render_greeks(greeks: dict) -> None:
     st.table(rows)
 
 
+# ---------------------------------------------------------------------------
+# Escenarios (Monte Carlo) dentro del Constructor
+# ---------------------------------------------------------------------------
+
+
+def format_pct(fraction: float) -> str:
+    """Formatea una fracción como porcentaje con 1 decimal (0.339 -> 33.9 %)."""
+    return f"{fraction * 100:.1f} %"
+
+
+def render_scenarios(market: Market, legs: list[Leg]) -> None:
+    """Desplegable con la PoP y la simulación del P&L AL VENCIMIENTO.
+
+    Solo se llama si la estrategia es válida. No hay nada de la curva
+    «hoy» aquí: la simulación es solo al vencimiento.
+    """
+    with st.expander("Escenarios (Monte Carlo)"):
+        render_mu_input()
+        sim = sim_settings_from_state()
+        errors = validate_simulation(market, legs, sim)
+        if errors:
+            for message in errors:
+                st.error(message)
+        else:
+            result = simulate_scenario(market, legs, settings_from_state(), sim)
+            render_scenario_results(result, sim)
+        for message in scenario_warnings(market):
+            st.info(message)
+
+
+def render_mu_input() -> None:
+    """Campo de μ (crecimiento esperado del precio, % anual).
+
+    Mismo patrón que Ajustes: el widget (`mu_pct_input`) copia su valor a
+    la entrada simple `mu_pct` con un callback. Sin min/max a propósito:
+    así un valor fuera de rango llega a validate_simulation, que muestra
+    el mensaje en español. Vacío (None) = escenario neutral al riesgo.
+    """
+    st.number_input(
+        "Crecimiento esperado del precio (% anual), comparable a r − q",
+        value=st.session_state["mu_pct"],
+        step=1.0,
+        format="%.2f",
+        placeholder="vacío = neutral al riesgo (r − q)",
+        help="Déjalo vacío para el escenario neutral al riesgo (crecimiento = r − q).",
+        key="mu_pct_input",
+        on_change=copy_setting,
+        args=("mu_pct",),
+    )
+
+
+def scenario_label(result, sim: SimulationSettings) -> str:
+    """Texto que dice qué escenario se simuló (neutral al riesgo o μ del usuario)."""
+    growth = format_pct(result.mu_used)
+    if sim.mu is None:
+        return f"Escenario: neutral al riesgo (crecimiento del precio = r − q = {growth} anual)."
+    return f"Escenario: μ del usuario (crecimiento esperado del precio = {growth} anual)."
+
+
+def render_scenario_results(result, sim: SimulationSettings) -> None:
+    """PoP exacta y simulada, valor esperado, percentiles e histograma."""
+    st.caption(scenario_label(result, sim))
+
+    st.markdown("**Probabilidad de beneficio al vencimiento (PoP)**")
+    cols = st.columns(2)
+    cols[0].metric("PoP exacta", format_pct(result.pop_exact))
+    cols[1].metric("PoP simulada", format_pct(result.pop_mc))
+    # f"{n:,}" pone comas de miles (100,000); las cambiamos por espacios (100 000).
+    n_paths = f"{result.n_paths:,}".replace(",", " ")
+    st.caption(f"PoP simulada con {n_paths} simulaciones (semilla {sim.seed}).")
+
+    st.markdown("**P&L simulado al vencimiento**")
+    cols = st.columns(4)
+    cols[0].metric("Valor esperado (no descontado)", format_usd(result.mean_pnl))
+    cols[1].metric("Percentil 5", format_usd(result.p5))
+    cols[2].metric("Mediana (p50)", format_usd(result.p50))
+    cols[3].metric("Percentil 95", format_usd(result.p95))
+    st.caption(
+        "El valor esperado es la media del P&L al vencimiento, sin descontar: "
+        "no es un precio justo."
+    )
+
+    st.plotly_chart(build_histogram(result), width="stretch")
+    st.caption(
+        "Las barras de los extremos acumulan las colas: incluyen todas las "
+        "simulaciones por debajo del percentil 0,5 % (primera barra) y por "
+        "encima del 99,5 % (última barra)."
+    )
+
+
+def build_histogram(result) -> go.Figure:
+    """Histograma del P&L simulado (barras ya contadas por el motor) y línea en cero."""
+    edges = result.hist_edges
+    # Solo para dibujar: cada barra va centrada entre sus dos bordes.
+    centers = (edges[:-1] + edges[1:]) / 2
+    widths = edges[1:] - edges[:-1]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=centers,
+            y=result.hist_counts,
+            width=widths,
+            name="Simulaciones",
+            marker={"color": COLOR_EXPIRY},
+            hovertemplate="P&L %{x:.2f} USD: %{y} simulaciones<extra></extra>",
+        )
+    )
+    fig.add_vline(x=0, line={"color": COLOR_BREAKEVEN, "width": 1})
+    fig.update_layout(
+        xaxis_title="P&L al vencimiento (USD)",
+        yaxis_title="Número de simulaciones",
+        bargap=0,
+        showlegend=False,
+        margin={"t": 20, "b": 40},
+    )
+    return fig
+
+
 def render_notices(market: Market) -> None:
     """Avisos informativos del motor (asesoría, americanas/europeas, días = 0, cierre)."""
     for message in market_warnings(market):
@@ -547,6 +695,38 @@ def render_settings() -> None:
     st.caption(
         "Las acciones no pagan comisión. Al vencimiento, la comisión de cierre solo se cobra "
         "si la opción vence con valor; en la curva «hoy» se cobra en todas las opciones."
+    )
+    render_simulation_settings()
+
+
+def render_simulation_settings() -> None:
+    """Número de simulaciones y semilla (mismo patrón de callbacks que las comisiones).
+
+    Sin min/max a propósito: así un valor no válido llega a
+    validate_simulation y el Constructor muestra el mensaje en español.
+    `step=1` con valores enteros hace que Streamlit devuelva enteros.
+    """
+    st.subheader("Simulación")
+    st.number_input(
+        "Número de simulaciones (Monte Carlo)",
+        step=1,
+        value=st.session_state["n_sims"],
+        key="n_sims_input",
+        on_change=copy_setting,
+        args=("n_sims",),
+    )
+    st.number_input(
+        "Semilla del generador aleatorio",
+        step=1,
+        value=st.session_state["seed"],
+        key="seed_input",
+        on_change=copy_setting,
+        args=("seed",),
+    )
+    st.caption(
+        "Entre 1 000 y 1 000 000 simulaciones. Con la misma semilla y los mismos "
+        "datos, el resultado simulado es siempre el mismo; cambiar la semilla "
+        "cambia solo la parte simulada (no la PoP exacta)."
     )
 
 

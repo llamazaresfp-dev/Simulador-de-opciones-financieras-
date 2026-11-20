@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from opciones.binomial import crr_greeks, crr_price, crr_price_grid
 from opciones.catalog import TEMPLATES, LegSpec, Template, build_legs
 from opciones.commissions import close_fee_today, open_fee
 from opciones.implied_vol import IVResult, implied_vol
@@ -25,7 +26,14 @@ from opciones.models import (
     Market,
 )
 from opciones.payoff import pnl_expiry, pnl_today, position_greeks, price_grid
-from opciones.pricing import bs_greeks, bs_price, default_premium
+from opciones.pricing import (
+    bs_greeks,
+    bs_price,
+    default_premium,
+    option_greeks,
+    option_price,
+    uses_binomial,
+)
 from opciones.simulation import ScenarioResult, SimulationSettings, simulate_scenario
 from opciones.validation import (
     market_warnings,
@@ -106,15 +114,21 @@ __all__ = [
     "bs_greeks",
     "bs_price",
     "compute_metrics",
+    "crr_greeks",
+    "crr_price",
+    "crr_price_grid",
     "default_premium",
     "implied_vol",
     "market_warnings",
+    "option_greeks",
+    "option_price",
     "pnl_expiry",
     "pnl_today",
     "position_greeks",
     "price_grid",
     "scenario_warnings",
     "simulate_scenario",
+    "uses_binomial",
     "validate_legs",
     "validate_market",
     "validate_simulation",

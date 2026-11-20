@@ -18,17 +18,27 @@ import math
 
 import numpy as np
 
-from opciones.models import MIN_VOL
+from opciones.models import MIN_VOL, PRICING_BINOMIAL, PRICING_MODELS
 
 VALID_UNDERLYINGS = ("Acción", "ETF", "Índice")
 VALID_KINDS = ("call", "put", "stock")
 VALID_SIDES = (1, -1)
 
 MSG_NOT_ADVICE = "Herramienta de estudio, no asesoría de inversión."
+# Acción/ETF con el modelo binomial activo (Etapa B1, AC-B12).
+MSG_BINOMIAL_ACTIVE = (
+    "Las opciones sobre acciones y ETF son americanas (se pueden ejercer antes "
+    "del vencimiento): las primas, la curva «hoy», las griegas y la volatilidad "
+    "implícita usan el modelo americano (aproximación binomial de "
+    "Cox-Ross-Rubinstein, no un valor exacto)."
+)
+# Acción/ETF con Black-Scholes seleccionado en Ajustes (Etapa B1, AC-B12).
 MSG_AMERICAN = (
     "Las opciones sobre acciones y ETF son americanas (se pueden ejercer antes "
-    "del vencimiento). Black-Scholes es solo una aproximación: puede "
-    "infravalorarlas, sobre todo los puts (hasta ~7 % medido)."
+    "del vencimiento), pero has elegido Black-Scholes, un modelo europeo: "
+    "subvalora los puts americanos, con un error típico de 1–8 % y a veces "
+    "mayor (medido hasta ~24 % muy dentro del dinero, con vencimiento largo "
+    "y volatilidad baja)."
 )
 MSG_EUROPEAN = (
     "Las opciones sobre índices son europeas (solo se ejercen al vencimiento): "
@@ -41,6 +51,9 @@ MSG_ZERO_DAYS = (
 MSG_CLOSE_FEE = (
     "Comisión de cierre al vencimiento: solo se cobra si la opción vence con "
     "valor; si vence sin valor, expira sola y no paga cierre."
+)
+MSG_BAD_PRICING_MODEL = (
+    "El modelo de valoración debe ser binomial o Black-Scholes."
 )
 
 
@@ -84,6 +97,13 @@ def validate_market(market) -> list[str]:
 
     if not _is_number(market.q):
         errors.append("El dividendo está vacío o no es un número.")
+
+    # Etapa B1: el modelo de valoración solo puede ser uno de los conocidos.
+    # (Comparamos con == y no con un set: así un valor raro, como una
+    # lista, no provoca un error de Python.)
+    pricing_model = getattr(market, "pricing_model", PRICING_BINOMIAL)
+    if not any(pricing_model == valid for valid in PRICING_MODELS):
+        errors.append(MSG_BAD_PRICING_MODEL)
 
     return errors
 
@@ -143,8 +163,11 @@ def market_warnings(market) -> list[str]:
     """Avisos informativos para mostrar junto a los resultados.
 
     - Siempre: es una herramienta de estudio, no asesoría.
-    - Acción/ETF: Black-Scholes aproxima opciones americanas (más en puts).
-    - Índice: las opciones son europeas.
+    - Acción/ETF con el modelo binomial: primas, «hoy», griegas e IV usan
+      el modelo americano (aproximación binomial).
+    - Acción/ETF con Black-Scholes (o un modelo desconocido, que el motor
+      valora con Black-Scholes): subvalora los puts americanos.
+    - Índice: las opciones son europeas (el selector no cambia nada).
     - Días = 0: la curva «hoy» es el intrínseco y no hay griegas.
     - Siempre: cuándo se cobra la comisión de cierre al vencimiento.
     """
@@ -153,7 +176,13 @@ def market_warnings(market) -> list[str]:
         return warnings
 
     if market.underlying in ("Acción", "ETF"):
-        warnings.append(MSG_AMERICAN)
+        # Misma regla que uses_binomial(): binomial solo si el modelo es
+        # exactamente "binomial"; cualquier otro valor se valora con BS.
+        pricing_model = getattr(market, "pricing_model", PRICING_BINOMIAL)
+        if pricing_model == PRICING_BINOMIAL:
+            warnings.append(MSG_BINOMIAL_ACTIVE)
+        else:
+            warnings.append(MSG_AMERICAN)
     elif market.underlying == "Índice":
         warnings.append(MSG_EUROPEAN)
 
@@ -198,10 +227,12 @@ MSG_FAT_TAILS = (
     "que la probabilidad de beneficio y los percentiles 5/95 pueden ser "
     "optimistas."
 )
+# Etapa B1: la IV ya usa el modelo americano; en los escenarios solo queda
+# el modelo de precio final, y al vencimiento el ejercicio anticipado da igual.
 MSG_SCENARIO_AMERICAN = (
-    "Las opciones sobre acciones y ETF son americanas (se pueden ejercer antes "
-    "del vencimiento): la volatilidad implícita y la simulación usan un modelo "
-    "europeo y quedan sesgadas."
+    "Las opciones sobre acciones y ETF son americanas, pero los escenarios solo "
+    "miran el vencimiento: usan únicamente el modelo lognormal de precio final "
+    "de estilo europeo, y al vencimiento el ejercicio anticipado ya no importa."
 )
 
 
@@ -254,7 +285,9 @@ def scenario_warnings(market) -> list[str]:
 
     - Siempre: es un modelo, no una predicción.
     - Siempre: las colas reales son más gruesas que la lognormal.
-    - Acción/ETF: las opciones americanas sesgan la IV y la simulación.
+    - Acción/ETF: solo queda el modelo lognormal de precio final (estilo
+      europeo); el ejercicio anticipado no importa al vencimiento. Igual
+      con cualquier modelo de valoración.
     - Índice: las opciones son europeas.
     - Siempre: herramienta de estudio, no asesoría (mismo texto del MVP).
     """

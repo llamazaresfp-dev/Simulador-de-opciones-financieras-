@@ -21,6 +21,7 @@ import pytest
 from opciones import IVResult, Leg, Market, bs_price, implied_vol
 from opciones.binomial import crr_price
 from opciones.implied_vol import (
+    AMERICAN_MIN_VEGA,
     MSG_ABOVE_UPPER_BOUND,
     MSG_AMERICAN_BELOW_INTRINSIC,
     MSG_AMERICAN_NOT_IDENTIFIABLE,
@@ -357,3 +358,69 @@ def test_european_bounds_unchanged(premium):
     expected = stage_a_reference("put", market, 140.0, premium)
     assert (result.vol, result.message) == expected
 
+
+
+# --- Guarda de vega casi nula (añadido aprobado por el usuario, 20-11-26) -----
+#
+# Cuando el precio del árbol casi no cambia con σ alrededor de la solución
+# (vega < AMERICAN_MIN_VEGA por unidad de σ), brentq encuentra "una" σ que
+# reproduce la prima, pero podría ser casi cualquier otra: la IV no es
+# identificable y se devuelve el mensaje en lugar del número.
+
+# Casos hallados con un barrido (S=100, r=4 %, q=1 %): calls muy ITM a 1 día,
+# vega en la solución ≈ 1e-10 (la σ que encontraba brentq estaba muy lejos
+# de la σ usada para la prima: 0,31 / 0,47 / 0,66 en lugar de 0,25).
+NEAR_ZERO_VEGA_CASES = [
+    ("call", 90.0, 0.25, 1),
+    ("call", 85.0, 0.25, 1),
+    ("call", 80.0, 0.25, 1),
+]
+
+
+@pytest.mark.parametrize("kind,strike,sigma,days", NEAR_ZERO_VEGA_CASES)
+def test_near_zero_vega_is_not_identifiable(kind, strike, sigma, days):
+    market = make_market(days=days, vol=sigma)
+    premium = tree_price(kind, market, strike, sigma)
+    # La prima sí está (por poco) por encima del intrínseco: no la atrapa la
+    # comprobación de límites, solo la guarda de vega.
+    assert above_intrinsic(premium, intrinsic(kind, SPOT, strike))
+    result = implied_vol(option_leg(kind, strike, premium), market)
+    check_result_shape(result)
+    assert result.vol is None
+    assert result.message == MSG_AMERICAN_NOT_IDENTIFIABLE
+
+
+def test_min_vega_threshold_value():
+    assert AMERICAN_MIN_VEGA == 1e-6
+
+
+@pytest.mark.parametrize("kind,strike,sigma,days", [
+    ("put", 100.0, 0.25, 182.5),
+    ("call", 100.0, 0.25, 45),
+    ("put", 110.0, 0.60, 365),
+    ("call", 110.0, 0.10, 45),
+    ("put", 90.0, 0.25, 45),
+])
+def test_normal_round_trip_still_returns_sigma(kind, strike, sigma, days):
+    market = make_market(days=days, vol=sigma)
+    premium = tree_price(kind, market, strike, sigma)
+    result = implied_vol(option_leg(kind, strike, premium), market)
+    assert result.message is None
+    assert result.vol == pytest.approx(sigma, abs=SIGMA_TOL)
+
+
+@pytest.mark.parametrize("underlying,pricing_model", [
+    ("Acción", "black_scholes"),
+    ("Índice", "binomial"),
+])
+def test_european_branch_has_no_vega_guard(underlying, pricing_model):
+    """La rama europea no cambia: el mismo caso de vega casi nula da una σ.
+
+    Valor de la Etapa A medido con bs_price: 0,27348052056262784.
+    """
+    market = make_market(days=1, vol=0.25, underlying=underlying,
+                         pricing_model=pricing_model)
+    premium = bs_price("call", SPOT, 90.0, RATE, Q, 0.25, market.T)
+    result = implied_vol(option_leg("call", 90.0, premium), market)
+    assert result.message is None
+    assert result.vol == pytest.approx(0.27348052056262784, abs=1e-9)

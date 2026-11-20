@@ -134,9 +134,41 @@ def test_engine_imports_without_streamlit():
         [
             sys.executable,
             "-c",
-            "import opciones, opciones.implied_vol, opciones.simulation, sys; "
+            "import opciones, opciones.implied_vol, opciones.simulation, "
+            "opciones.binomial, sys; "
             "assert 'streamlit' not in sys.modules",
         ],
         check=True,
         cwd=REPO_ROOT,
     )
+
+
+# --- Exportaciones de la Etapa B1 (bloque 5) ----------------------------------
+
+B1_EXPORTS = (
+    "crr_greeks", "crr_price", "crr_price_grid",
+    "option_greeks", "option_price", "uses_binomial",
+)
+
+
+def test_stage_b1_names_are_exported():
+    import opciones
+    from opciones import binomial as binomial_module, pricing
+
+    for name in B1_EXPORTS:
+        assert name in opciones.__all__
+        assert callable(getattr(opciones, name))
+    assert opciones.crr_price is binomial_module.crr_price
+    assert opciones.option_price is pricing.option_price
+
+
+def test_new_names_sorted_and_no_binomial_name():
+    import opciones
+
+    # Nada llamado `binomial` en la API: sombrearía el submódulo
+    # (el mismo problema que ya tiene `implied_vol`).
+    assert "binomial" not in opciones.__all__
+    assert opciones.binomial.__name__ == "opciones.binomial"
+    # Los nombres nuevos van en orden alfabético dentro de __all__.
+    positions = [opciones.__all__.index(name) for name in B1_EXPORTS]
+    assert positions == sorted(positions)

@@ -20,6 +20,13 @@ from opciones import (
     validate_market,
     validate_simulation,
 )
+from opciones.validation import (
+    MSG_AMERICAN,
+    MSG_BAD_PRICING_MODEL,
+    MSG_BINOMIAL_ACTIVE,
+    MSG_EUROPEAN,
+    MSG_SCENARIO_AMERICAN,
+)
 
 
 def market(**changes):
@@ -168,32 +175,99 @@ def test_error_names_the_leg_number():
 # --- Avisos por subyacente (AC17) -------------------------------------------
 
 
+# Etapa B1 (AC-B12): el aviso de Acción/ETF depende del modelo activo.
+# Antes (Etapa A) este test exigía «7 %» con Black-Scholes; ahora el
+# helper market() usa el modelo por defecto (binomial) y el texto de
+# Black-Scholes cita «1–8 %» y «24 %» (se prueba más abajo).
 @pytest.mark.parametrize("underlying", ["Acción", "ETF"])
 def test_stock_and_etf_warn_about_american_options(underlying):
     warnings = market_warnings(market(underlying=underlying))
     american = [w for w in warnings if "americanas" in w]
     assert len(american) == 1
-    assert "puts" in american[0]
-    assert "7 %" in american[0]
     assert not any("europeas" in w for w in warnings)
 
 
-def test_index_says_european_options():
-    warnings = market_warnings(market(underlying="Índice"))
+@pytest.mark.parametrize("underlying", ["Acción", "ETF"])
+def test_binomial_active_warning(underlying):
+    warnings = market_warnings(market(underlying=underlying, pricing_model="binomial"))
+    binomial = [w for w in warnings if "binomial" in w]
+    assert len(binomial) == 1
+    text = binomial[0]
+    assert "americano" in text and "aproximación binomial" in text
+    for word in ("primas", "«hoy»", "griegas", "volatilidad implícita"):
+        assert word in text
+    assert not any("subvalora" in w for w in warnings)
+
+
+def test_default_model_shows_binomial_warning():
+    # El modelo por defecto de Market es el binomial.
+    assert MSG_BINOMIAL_ACTIVE in market_warnings(market(underlying="Acción"))
+
+
+@pytest.mark.parametrize("underlying", ["Acción", "ETF"])
+def test_black_scholes_warns_about_underpriced_puts(underlying):
+    warnings = market_warnings(market(underlying=underlying, pricing_model="black_scholes"))
+    bs = [w for w in warnings if "Black-Scholes" in w]
+    assert len(bs) == 1
+    text = bs[0]
+    assert "subvalora los puts americanos" in text
+    assert "1–8 %" in text and "24 %" in text
+    assert not any("aproximación binomial" in w for w in warnings)
+    assert not any("europeas" in w for w in warnings)
+
+
+@pytest.mark.parametrize("pricing_model", ["binomial", "black_scholes", "otro"])
+def test_index_says_european_options(pricing_model):
+    warnings = market_warnings(market(underlying="Índice", pricing_model=pricing_model))
+    assert MSG_EUROPEAN in warnings
     assert any("europeas" in w for w in warnings)
     assert not any("americanas" in w for w in warnings)
+    assert not any("binomial" in w for w in warnings)
+
+
+def test_index_european_text_unchanged():
+    assert MSG_EUROPEAN == (
+        "Las opciones sobre índices son europeas (solo se ejercen al vencimiento): "
+        "Black-Scholes es el modelo adecuado."
+    )
 
 
 @pytest.mark.parametrize("underlying", ["Acción", "ETF", "Índice"])
-def test_always_says_not_advice(underlying):
-    warnings = market_warnings(market(underlying=underlying))
+@pytest.mark.parametrize("pricing_model", ["binomial", "black_scholes"])
+def test_always_says_not_advice(underlying, pricing_model):
+    warnings = market_warnings(market(underlying=underlying, pricing_model=pricing_model))
     assert_spanish_messages(warnings)
     assert any("no asesoría" in w for w in warnings)
+    assert any("cierre" in w and "con valor" in w for w in warnings)
 
 
 def test_close_commission_note_is_present():
     warnings = market_warnings(market())
     assert any("cierre" in w and "con valor" in w for w in warnings)
+
+
+def test_market_warning_messages_are_distinct():
+    assert len({MSG_BINOMIAL_ACTIVE, MSG_AMERICAN, MSG_EUROPEAN}) == 3
+
+
+# --- Modelo de valoración (Etapa B1) ------------------------------------------
+
+
+@pytest.mark.parametrize("pricing_model", ["binomial", "black_scholes"])
+@pytest.mark.parametrize("underlying", ["Acción", "ETF", "Índice"])
+def test_valid_pricing_models_are_accepted(pricing_model, underlying):
+    assert validate_market(market(underlying=underlying, pricing_model=pricing_model)) == []
+
+
+@pytest.mark.parametrize("pricing_model", ["otro", "", None, 3, "Binomial"])
+def test_unknown_pricing_model_is_error(pricing_model):
+    errors = validate_market(market(pricing_model=pricing_model))
+    assert errors == [MSG_BAD_PRICING_MODEL]
+    assert "modelo de valoración" in errors[0]
+
+
+def test_unknown_pricing_model_warnings_do_not_crash():
+    assert_spanish_messages(market_warnings(market(pricing_model="otro")))
 
 
 def test_warnings_do_not_crash_with_invalid_market():
@@ -314,17 +388,27 @@ def test_scenario_warnings_always_present(underlying):
     assert MSG_NOT_ADVICE_TEXT in warnings
 
 
+# Etapa B1 (AC-B12): antes este test exigía que el aviso dijera que la IV
+# y la simulación «quedan sesgadas»; ahora la IV usa el modelo americano y
+# el aviso dice que solo queda el modelo lognormal de precio final de
+# estilo europeo, donde el ejercicio anticipado no importa al vencimiento.
 @pytest.mark.parametrize("underlying", ["Acción", "ETF"])
-def test_scenario_warnings_american_bias(underlying):
-    warnings = scenario_warnings(market(underlying=underlying))
+@pytest.mark.parametrize("pricing_model", ["binomial", "black_scholes"])
+def test_scenario_warnings_american_bias(underlying, pricing_model):
+    warnings = scenario_warnings(market(underlying=underlying, pricing_model=pricing_model))
     american = [w for w in warnings if "americanas" in w]
-    assert len(american) == 1
-    assert "volatilidad implícita" in american[0] and "simulación" in american[0]
+    assert american == [MSG_SCENARIO_AMERICAN]
+    text = american[0]
+    assert "lognormal" in text and "precio final" in text and "europeo" in text
+    assert "ejercicio anticipado" in text and "vencimiento" in text
+    assert "sesgad" not in text
     assert not any("europeas" in w for w in warnings)
 
 
-def test_scenario_warnings_index_is_european():
-    warnings = scenario_warnings(market(underlying="Índice"))
+@pytest.mark.parametrize("pricing_model", ["binomial", "black_scholes"])
+def test_scenario_warnings_index_is_european(pricing_model):
+    warnings = scenario_warnings(market(underlying="Índice", pricing_model=pricing_model))
+    assert MSG_EUROPEAN in warnings
     assert any("europeas" in w for w in warnings)
     assert not any("americanas" in w for w in warnings)
 

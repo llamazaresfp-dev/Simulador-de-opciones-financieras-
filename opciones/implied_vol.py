@@ -61,6 +61,13 @@ MSG_AMERICAN_BELOW_INTRINSIC = (
 # de 500/501 pasos (caro), así que no pedimos 1e-14 como con Black-Scholes.
 AMERICAN_XTOL = 1e-8
 
+# Vega mínima (por unidad de σ, es decir, por 100 puntos de volatilidad) en
+# la σ encontrada para aceptarla. Por debajo, el precio casi no se mueve con
+# σ y la σ de brentq es una de muchas posibles (ver _american_vega).
+AMERICAN_MIN_VEGA = 1e-6
+# Desplazamiento de σ para medir esa vega con una diferencia central.
+AMERICAN_VEGA_BUMP = 1e-4
+
 
 @dataclass
 class IVResult:
@@ -169,7 +176,8 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
                           market: Market) -> IVResult:
     """IV con el árbol americano (500/501 pasos promediados, vía `option_price`).
 
-    Orden: límites americanos -> identificabilidad -> buscador (brentq).
+    Orden: límites americanos -> identificabilidad -> buscador (brentq) ->
+    guarda de vega casi nula en la σ encontrada.
 
     ¿Por qué algunas primas no tienen IV identificable? En una opción
     americana muy dentro del dinero lo óptimo es ejercer ya, y entonces su
@@ -212,4 +220,33 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
         return IVResult(None, MSG_SOLVER_FAILED)
     if not math.isfinite(vol):
         return IVResult(None, MSG_SOLVER_FAILED)
+
+    # Guarda de vega casi nula (añadida el 20-11-26, aprobada por el usuario).
+    # ¿Por qué? Con una call muy ITM a 1 día, por ejemplo, el precio del árbol
+    # casi no depende de σ: brentq encuentra una σ que reproduce la prima, pero
+    # cualquier otra σ también lo haría (medido: σ de 0,31 a 0,66 para una
+    # prima calculada con 0,25). En las pruebas, todas las σ erróneas tenían
+    # vega ≤ 7e-11 y todas las correctas, ≥ 8,6e-9: con vega < 1e-6 decimos
+    # que la IV no es identificable en vez de mostrar un número engañoso.
+    try:
+        vega = _american_vega(kind, strike, vol, market)
+    except (ValueError, RuntimeError, ArithmeticError):
+        return IVResult(None, MSG_SOLVER_FAILED)
+    if not math.isfinite(vega):
+        return IVResult(None, MSG_SOLVER_FAILED)
+    if vega < AMERICAN_MIN_VEGA:
+        return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
     return IVResult(float(vol), None)
+
+
+def _american_vega(kind: str, strike: float, sigma: float, market: Market) -> float:
+    """Vega del árbol en σ, por unidad de σ (diferencia central).
+
+    vega ≈ (precio(σ + h) − precio(σ − h)) / (2·h), con el mismo precio
+    promediado (500/501 pasos) que usa el buscador. Si σ es muy pequeña,
+    h se reduce a σ/2 para no pasar a una volatilidad negativa.
+    """
+    bump = min(AMERICAN_VEGA_BUMP, sigma / 2)
+    price_up = float(option_price(kind, market, strike, sigma=sigma + bump))
+    price_down = float(option_price(kind, market, strike, sigma=sigma - bump))
+    return (price_up - price_down) / (2 * bump)

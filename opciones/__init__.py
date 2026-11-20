@@ -14,6 +14,7 @@ import numpy as np
 
 from opciones.catalog import TEMPLATES, LegSpec, Template, build_legs
 from opciones.commissions import close_fee_today, open_fee
+from opciones.implied_vol import IVResult, implied_vol
 from opciones.metrics import Metrics, compute_metrics
 from opciones.models import (
     DAYS_PER_YEAR,
@@ -85,6 +86,7 @@ __all__ = [
     "TEMPLATES",
     "Analysis",
     "CommissionSettings",
+    "IVResult",
     "Leg",
     "LegSpec",
     "Market",
@@ -96,6 +98,7 @@ __all__ = [
     "bs_price",
     "compute_metrics",
     "default_premium",
+    "implied_vol",
     "market_warnings",
     "pnl_expiry",
     "pnl_today",

@@ -332,3 +332,118 @@ def test_analyze_greeks_equal_position_greeks_with_binomial():
     legs = build_legs(iron_condor(), market)
     result = analyze(market, legs, FEES)
     assert result.greeks == position_greeks(legs, market)
+
+
+# --- Bloque 7: rendimiento de analyze() y casos límite (AC-B13, AC-B14) ----
+
+import math  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+
+from opciones import binomial as binomial_module  # noqa: E402
+from opciones import implied_vol  # noqa: E402
+from opciones.models import MIN_VOL  # noqa: E402
+
+
+def clear_engine_caches():
+    """Vacía todas las cachés del motor para medir en frío."""
+    binomial_module._cached_price.cache_clear()
+    binomial_module._cached_grid.cache_clear()
+    binomial_module._cached_greeks.cache_clear()
+    sys.modules["opciones.implied_vol"]._cached_american_iv.cache_clear()
+
+
+def elapsed(function):
+    start = time.perf_counter()
+    function()
+    return time.perf_counter() - start
+
+
+def test_iron_condor_analyze_cold_and_warm_are_fast():
+    market = make_market()               # Acción, binomial por defecto
+    legs = build_legs(iron_condor(), market)
+    clear_engine_caches()
+    cold = elapsed(lambda: analyze(market, legs, FEES))
+    warm = elapsed(lambda: analyze(market, legs, FEES))
+    assert cold < 2.0
+    assert warm < 0.3
+
+
+def test_iron_condor_analyze_warm_equals_cold():
+    market = make_market()
+    legs = build_legs(iron_condor(), market)
+    clear_engine_caches()
+    cold = analyze(market, legs, FEES)
+    warm = analyze(market, legs, FEES)
+    np.testing.assert_allclose(warm.today_curve, cold.today_curve, rtol=0, atol=1e-12)
+    for name in GREEK_NAMES:
+        assert warm.greeks[name] == pytest.approx(cold.greeks[name], abs=1e-12)
+
+
+EDGE_MARKETS = [
+    dict(days=0),
+    dict(vol=MIN_VOL),
+    dict(days=1),
+    dict(days=3650),
+    dict(rate=-0.05, q=0.20),
+    dict(rate=0.20, q=-0.05),
+    dict(vol=10.0, days=3650),
+]
+
+
+def edge_legs(market):
+    """Patas con strikes lejanísimos (1 y 10 000), una ATM y acciones."""
+    legs = [Leg("call", 1, 1, 1.0, 0.0), Leg("put", -1, 1, 10_000.0, 0.0),
+            Leg("put", 1, 2, 100.0, 0.0), Leg("stock", 1, 100, None, market.spot)]
+    for leg in legs:
+        if leg.kind != "stock":
+            leg.price = default_premium(leg.kind, market, leg.strike)
+    return legs
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("changes", EDGE_MARKETS)
+def test_edge_markets_never_give_nan_or_raise(model, changes):
+    market = make_market(model=model, **changes)
+    legs = edge_legs(market)
+    for leg in legs:
+        assert math.isfinite(leg.price) and leg.price >= 0.0
+    result = analyze(market, legs, FEES)
+    assert np.all(np.isfinite(result.today_curve))
+    assert np.all(np.isfinite(result.expiry_curve))
+    for name in GREEK_NAMES:
+        value = result.greeks[name]
+        if market.days == 0:
+            assert value is None
+        else:
+            assert value is not None and math.isfinite(value)
+    for leg in legs:
+        iv = implied_vol(leg, market)
+        assert (iv.vol is None) != (iv.message is None)
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_zero_days_today_equals_intrinsic_and_greeks_none(model):
+    market = make_market(model=model, days=0)
+    S = np.array([80.0, 100.0, 120.0])
+    np.testing.assert_allclose(option_price("put", market, 100.0, S),
+                               np.maximum(100.0 - S, 0.0), atol=1e-12)
+    greeks = position_greeks([Leg("put", 1, 1, 100.0, 2.0)], market)
+    assert all(value is None for value in greeks.values())
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_zero_premium_iv_gives_message(model):
+    market = make_market(model=model)
+    result = implied_vol(Leg("call", 1, 1, 100.0, 0.0), market)
+    assert result.vol is None and result.message
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_stock_only_position_has_no_tree(model):
+    market = make_market(model=model)
+    legs = [Leg("stock", 1, 100, None, 100.0)]
+    result = analyze(market, legs, NO_FEES)
+    np.testing.assert_allclose(result.today_curve, 100.0 * (result.grid - 100.0), atol=1e-9)
+    assert result.greeks["delta"] == 100
+    assert result.greeks["vega"] == 0.0

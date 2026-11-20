@@ -364,7 +364,8 @@ def test_binomial_module_does_not_import_pricing_or_streamlit():
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module)
-    assert imported <= {"math", "numpy", "opciones.models"}
+    # functools (biblioteca estándar) aporta lru_cache para las cachés (bloque 7).
+    assert imported <= {"functools", "math", "numpy", "opciones.models"}
 
 
 def test_binomial_imports_without_streamlit():
@@ -378,3 +379,164 @@ def test_binomial_imports_without_streamlit():
         check=True,
         cwd=BINOMIAL_SOURCE.parent.parent,
     )
+
+
+# --- Bloque 7: cachés, vega/rho agrupados y tiempos (AC-B13) ----------------
+#
+# Las cachés (lru_cache) no deben cambiar ningún número: comparamos el
+# resultado con caché con el cálculo directo sin caché (tolerancia 1e-12).
+# Los tests de tiempo son cotas holgadas (máquinas distintas): sirven de
+# guarda de regresión, no de medida exacta.
+
+import time  # noqa: E402
+
+from opciones import binomial as binomial_module  # noqa: E402
+
+CACHE_TOL = 1e-12
+
+
+def clear_tree_caches():
+    """Vacía las cachés del árbol para medir en frío."""
+    binomial_module._cached_price.cache_clear()
+    binomial_module._cached_grid.cache_clear()
+    binomial_module._cached_greeks.cache_clear()
+
+
+def elapsed(function):
+    start = time.perf_counter()
+    function()
+    return time.perf_counter() - start
+
+
+@pytest.mark.parametrize("cached", [
+    binomial_module._cached_price,
+    binomial_module._cached_grid,
+    binomial_module._cached_greeks,
+])
+def test_caches_are_bounded(cached):
+    assert 256 <= cached.cache_info().maxsize <= 512
+
+
+@pytest.mark.parametrize("kind, K, sigma, T", [
+    ("put", 100.0, 0.25, 0.5),
+    ("call", 110.0, 0.40, 1.0),
+    ("put", 90.0, 0.10, 1 / 365),
+])
+def test_cached_price_equals_uncached(kind, K, sigma, T):
+    clear_tree_caches()
+    uncached = float(binomial_module._averaged_values(
+        kind, [100.0], K, 0.04, 0.01, sigma, T, CRR_PRICE_STEPS, True)[0])
+    first = crr_price(kind, 100.0, K, 0.04, 0.01, sigma, T)
+    second = crr_price(kind, 100.0, K, 0.04, 0.01, sigma, T)
+    assert first == pytest.approx(uncached, abs=CACHE_TOL)
+    assert second == first
+    assert binomial_module._cached_price.cache_info().hits >= 1
+
+
+def test_cached_grid_equals_uncached_and_is_not_shared():
+    clear_tree_caches()
+    S = np.linspace(70.0, 130.0, 401)
+    uncached = binomial_module._averaged_values("put", S, 100.0, 0.04, 0.01, 0.25, 0.5,
+                                                CRR_GRID_STEPS, True)
+    uncached = np.maximum(uncached, np.maximum(100.0 - S, 0.0))
+    first = crr_price_grid("put", S, 100.0, 0.04, 0.01, 0.25, 0.5)
+    np.testing.assert_allclose(first, uncached, rtol=0, atol=CACHE_TOL)
+    # Lo devuelto es una copia modificable: estropearla no envenena la caché.
+    assert first.flags.writeable
+    first[:] = -1.0
+    second = crr_price_grid("put", S, 100.0, 0.04, 0.01, 0.25, 0.5)
+    np.testing.assert_allclose(second, uncached, rtol=0, atol=CACHE_TOL)
+    assert binomial_module._cached_grid.cache_info().hits >= 1
+    # El array guardado dentro de la caché es de solo lectura.
+    stored = binomial_module._cached_grid("put", 100.0, 0.04, 0.01, 0.25, 0.5,
+                                          CRR_GRID_STEPS, True, S.tobytes())
+    assert not stored.flags.writeable
+
+
+def test_cached_grid_key_depends_on_spot_values():
+    S1 = np.linspace(70.0, 130.0, 401)
+    S2 = S1 + 1.0
+    a = crr_price_grid("call", S1, 100.0, 0.04, 0.01, 0.25, 0.5)
+    b = crr_price_grid("call", S2, 100.0, 0.04, 0.01, 0.25, 0.5)
+    assert not np.allclose(a, b)
+
+
+@pytest.mark.parametrize("kind, K, sigma, T, r, q", [
+    ("put", 100.0, 0.25, 0.5, 0.04, 0.01),
+    ("call", 90.0, 0.60, 1.0, 0.04, 0.01),
+    ("put", 110.0, 0.005, 0.5, 0.04, 0.01),   # vega unilateral (σ − 0,01 < MIN_VOL)
+    ("call", 100.0, MIN_VOL, 0.5, 0.20, 0.0),  # árbol sin servir: límite determinista
+])
+def test_cached_greeks_equal_uncached_and_dict_is_new(kind, K, sigma, T, r, q):
+    clear_tree_caches()
+    uncached = _crr_greeks(kind, 100.0, K, r, q, sigma, T, CRR_PRICE_STEPS, True)
+    first = crr_greeks(kind, 100.0, K, r, q, sigma, T)
+    for name, value in uncached.items():
+        assert first[name] == pytest.approx(value, abs=CACHE_TOL)
+    first["delta"] = 999.0
+    second = crr_greeks(kind, 100.0, K, r, q, sigma, T)
+    assert second["delta"] == pytest.approx(uncached["delta"], abs=CACHE_TOL)
+    assert second is not first
+
+
+@pytest.mark.parametrize("kind, K, sigma, T, r, q", [
+    ("put", 100.0, 0.25, 0.5, 0.04, 0.01),
+    ("call", 110.0, 0.40, 1.0, -0.05, 0.20),
+    ("put", 100.0, 0.005, 0.5, 0.04, 0.01),
+    ("call", 100.0, 0.001, 0.5, 0.20, 0.0),
+])
+def test_batched_vega_rho_equal_separate_trees(kind, K, sigma, T, r, q):
+    # Vega y rho agrupados en un solo bucle = cuatro árboles por separado.
+    def price(vol, rate):
+        return float(binomial_module._averaged_values(
+            kind, [100.0], K, rate, q, vol, T, CRR_PRICE_STEPS, True)[0])
+
+    bump = binomial_module.GREEK_BUMP
+    if sigma - bump < MIN_VOL:
+        vega = price(sigma + bump, r) - price(sigma, r)
+    else:
+        vega = (price(sigma + bump, r) - price(sigma - bump, r)) / 2.0
+    rho = (price(sigma, r + bump) - price(sigma, r - bump)) / 2.0
+    greeks = _crr_greeks(kind, 100.0, K, r, q, sigma, T, CRR_PRICE_STEPS, True)
+    assert greeks["vega"] == pytest.approx(vega, abs=CACHE_TOL)
+    assert greeks["rho"] == pytest.approx(rho, abs=CACHE_TOL)
+
+
+def test_premium_cold_is_fast():
+    clear_tree_caches()
+    assert elapsed(lambda: crr_price("put", 100.0, 100.0, 0.04, 0.01, 0.25, 0.5)) < 0.25
+
+
+def test_today_grid_401_points_cold_is_fast():
+    clear_tree_caches()
+    S = np.linspace(70.0, 130.0, 401)
+    assert elapsed(lambda: crr_price_grid("put", S, 100.0, 0.04, 0.01, 0.25, 0.5)) < 1.0
+
+
+# --- Bloque 7: casos límite del árbol (AC-B14) ----------------------------
+
+
+@pytest.mark.parametrize("kind", ["call", "put"])
+@pytest.mark.parametrize("K", [1.0, 100.0, 10_000.0])
+@pytest.mark.parametrize("sigma, T", [
+    (MIN_VOL, 0.5),
+    (0.25, 1 / 365),
+    (0.25, 10.0),
+    (10.0, 10.0),     # σ 1000 % a 10 años: u^N enorme
+    (50.0, 10.0),     # σ absurda: el exponente se recorta
+])
+@pytest.mark.parametrize("r, q", [(0.04, 0.01), (-0.05, 0.20), (0.20, -0.05)])
+def test_extreme_inputs_give_finite_prices_within_bounds(kind, K, sigma, T, r, q):
+    price = crr_price(kind, 100.0, K, r, q, sigma, T)
+    assert math.isfinite(price)
+    # Techo económico: con r o q negativos el valor sin volatilidad puede
+    # superar K (put: K·e^(−rT)) o S (call: S·e^(−qT)).
+    if kind == "call":
+        ceiling = max(100.0, 100.0 * math.exp(-q * T))
+    else:
+        ceiling = max(K, K * math.exp(-r * T))
+    assert intrinsic(kind, 100.0, K) - 1e-9 <= price <= ceiling * (1 + 1e-12)
+    grid = crr_price_grid(kind, np.array([0.0, 50.0, 100.0, 200.0]), K, r, q, sigma, T)
+    assert np.all(np.isfinite(grid))
+    greeks = crr_greeks(kind, 100.0, K, r, q, sigma, T)
+    assert all(math.isfinite(value) for value in greeks.values())

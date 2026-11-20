@@ -24,6 +24,7 @@ Este módulo es puro: solo usa numpy y math, no importa `opciones.pricing`
 """
 
 import math
+from functools import lru_cache
 
 import numpy as np
 
@@ -47,6 +48,12 @@ _MAX_EXPONENT = 600.0
 
 # Desplazamiento para vega y rho: 1 punto porcentual (0,01 como fracción).
 GREEK_BUMP = 0.01
+
+# Tamaño máximo de las cachés (ver "Cachés" más abajo). Acotadas para que
+# la memoria no crezca sin límite: al llenarse se olvida lo más antiguo.
+PRICE_CACHE_SIZE = 512
+GREEKS_CACHE_SIZE = 256
+GRID_CACHE_SIZE = 256
 
 # Si u − d es menor que esto, el árbol no tiene "anchura" (sigma·raíz(dt) es
 # prácticamente 0) y usamos el límite determinista.
@@ -208,6 +215,50 @@ def _averaged_values(kind: str, S, K: float, r: float, q: float,
     return 0.5 * (first + second)
 
 
+# --- Cachés (memoización) ------------------------------------------------------
+#
+# ¿Por qué? Streamlit vuelve a ejecutar todo el script en cada clic, y el
+# árbol es caro (cientos de pasos). Si los datos no han cambiado, el
+# resultado tampoco: lo guardamos y la próxima vez lo devolvemos al momento.
+#
+# ¿Cómo? `functools.lru_cache` guarda los últimos resultados en un
+# diccionario cuya CLAVE son los argumentos de la función. Por eso:
+# - Todos los argumentos deben ser "hashables" (números, textos, bytes).
+#   Un array de numpy no lo es, así que en la malla usamos sus bytes
+#   (`S.tobytes()`): dos arrays con los mismos números dan la misma clave.
+# - La caché es "pura": no depende de Streamlit; mismos datos, mismo número.
+# - Está acotada (maxsize): al llenarse se descarta lo menos usado.
+#
+# Cuidado con los arrays: si devolviéramos el array guardado en la caché y
+# alguien lo modificara, la caché quedaría "envenenada" para las siguientes
+# llamadas. Por eso el array guardado es de solo lectura y `crr_price_grid`
+# devuelve siempre una COPIA. Las griegas se guardan como tupla (inmutable)
+# y se devuelve un diccionario nuevo en cada llamada.
+
+
+@lru_cache(maxsize=PRICE_CACHE_SIZE)
+def _cached_price(kind: str, S: float, K: float, r: float, q: float, sigma: float,
+                  T: float, steps: int, american: bool) -> float:
+    """Prima promediada (N y N+1 pasos) guardada en caché. Clave: todos los argumentos."""
+    values = _averaged_values(kind, [S], K, r, q, sigma, T, steps, american)
+    return float(values[0])
+
+
+@lru_cache(maxsize=GRID_CACHE_SIZE)
+def _cached_grid(kind: str, K: float, r: float, q: float, sigma: float, T: float,
+                 steps: int, american: bool, S_bytes: bytes) -> np.ndarray:
+    """Curva de precios guardada en caché (array de SOLO LECTURA).
+
+    Clave: (kind, K, r, q, sigma, T, steps, american, bytes de los spots).
+    """
+    S = np.frombuffer(S_bytes, dtype=float)
+    values = _averaged_values(kind, S, K, r, q, sigma, T, steps, american)
+    if american:
+        values = np.maximum(values, _intrinsic(kind, S, K))
+    values.setflags(write=False)
+    return values
+
+
 def crr_price(kind: str, S: float, K: float, r: float, q: float, sigma: float,
               T: float, steps: int = CRR_PRICE_STEPS, american: bool = True) -> float:
     """Prima por acción con el árbol CRR (media de 500 y 501 pasos por defecto).
@@ -215,9 +266,12 @@ def crr_price(kind: str, S: float, K: float, r: float, q: float, sigma: float,
     - kind: "call" o "put"; S: spot (un número).
     - american=True permite el ejercicio anticipado en cada nodo.
     Nunca devuelve NaN: ver las guardas de `_crr_values`.
+    El resultado se guarda en caché (ver "Cachés"): repetir la llamada con
+    los mismos datos es instantáneo.
     """
-    values = _averaged_values(kind, [S], K, r, q, sigma, T, steps, american)
-    return float(values[0])
+    _check_kind(kind)
+    return _cached_price(kind, float(S), float(K), float(r), float(q), float(sigma),
+                         float(T), int(steps), bool(american))
 
 
 def crr_price_grid(kind: str, S_array, K: float, r: float, q: float, sigma: float,
@@ -226,13 +280,14 @@ def crr_price_grid(kind: str, S_array, K: float, r: float, q: float, sigma: floa
 
     Media de 200 y 201 pasos por defecto: suficiente para dibujar la curva
     y unas 2-3 veces más rápido que 500/501. Si es americana, el resultado
-    nunca baja del intrínseco (se puede ejercer hoy). Devuelve un array.
+    nunca baja del intrínseco (se puede ejercer hoy). Devuelve un array
+    nuevo (copia del guardado en caché, así puedes modificarlo sin riesgo).
     """
-    S = np.atleast_1d(np.asarray(S_array, dtype=float))
-    values = _averaged_values(kind, S, K, r, q, sigma, T, steps, american)
-    if american:
-        values = np.maximum(values, _intrinsic(kind, S, K))
-    return values
+    _check_kind(kind)
+    S = np.ascontiguousarray(np.atleast_1d(np.asarray(S_array, dtype=float)))
+    values = _cached_grid(kind, float(K), float(r), float(q), float(sigma), float(T),
+                          int(steps), bool(american), S.tobytes())
+    return values.copy()
 
 
 # --- Griegas del árbol -------------------------------------------------------
@@ -308,6 +363,60 @@ def _bumped_greeks(kind: str, S: float, K: float, r: float, q: float,
     return delta, gamma, theta_year
 
 
+def _batched_values(kind: str, S: float, K: float, q: float, T: float, N: int,
+                    american: bool, scenarios) -> np.ndarray:
+    """Valor de la opción (un solo spot) para VARIOS escenarios (σ, r) a la vez.
+
+    Es el mismo árbol de `_crr_values`, pero cada FILA de la matriz es un
+    escenario distinto, con su propia p, su propio descuento y sus propias
+    potencias de u. Así recorremos los N pasos UNA vez para todos los
+    escenarios, en lugar de una vez por escenario (el bucle de Python es lo
+    caro; las cuentas con numpy de varias filas cuestan casi lo mismo).
+    Las operaciones son idénticas fila a fila, así que el resultado coincide
+    con llamar a `_crr_values` para cada escenario.
+    """
+    results = np.zeros(len(scenarios))
+    rows, probs, discounts, powers_rows = [], [], [], []
+    for index, (vol, rate) in enumerate(scenarios):
+        tree = _tree_parameters(rate, q, vol, T, N) if vol > 0 else None
+        if tree is None:
+            # Árbol sin anchura o p fuera de [0, 1]: el camino normal ya
+            # aplica el límite determinista.
+            results[index] = _crr_values(kind, [S], K, rate, q, vol, T, N, american)[0]
+            continue
+        p, disc, powers = tree
+        rows.append(index)
+        probs.append(p)
+        discounts.append(disc)
+        powers_rows.append(powers)
+    if not rows:
+        return results
+
+    p = np.array(probs)[:, None]
+    disc = np.array(discounts)[:, None]
+    powers = np.array(powers_rows)          # una fila de potencias por escenario
+    with np.errstate(over="ignore", invalid="ignore"):
+        values = _intrinsic(kind, S * powers[:, 0::2], K)
+        for i in range(N - 1, -1, -1):
+            values = disc * (p * values[:, 1:i + 2] + (1.0 - p) * values[:, 0:i + 1])
+            if american:
+                node_prices = S * powers[:, N - i:N + i + 1:2]
+                values = np.maximum(values, _intrinsic(kind, node_prices, K))
+    tree_values = np.nan_to_num(values[:, 0], nan=0.0)
+    upper = S if kind == "call" else K
+    results[rows] = np.clip(tree_values, 0.0, upper)
+    return results
+
+
+def _batched_prices(kind: str, S: float, K: float, q: float, T: float, steps: int,
+                    american: bool, scenarios) -> list:
+    """Precio promediado (N y N+1 pasos) de cada escenario (σ, r)."""
+    N = _effective_steps(steps, T)
+    first = _batched_values(kind, S, K, q, T, N, american, scenarios)
+    second = _batched_values(kind, S, K, q, T, N + 1, american, scenarios)
+    return [float(value) for value in 0.5 * (first + second)]
+
+
 def _crr_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
                 T: float, steps: int, american: bool) -> dict:
     """Griegas del árbol CRR (función interna; `american=False` sirve en los
@@ -340,14 +449,24 @@ def _crr_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
     else:
         delta, gamma, theta_year = (0.5 * (a + b) for a, b in zip(first, second))
 
-    def price(vol, rate):
-        return float(_averaged_values(kind, [S], K, rate, q, vol, T, steps, american)[0])
+    # Vega y rho: los cuatro precios desplazados salen de UN solo bucle de
+    # inducción por cada N (ver `_batched_prices`), no de cuatro árboles.
+    one_sided = sigma - GREEK_BUMP < MIN_VOL
+    vol_down = sigma if one_sided else sigma - GREEK_BUMP
+    scenarios = (
+        (sigma + GREEK_BUMP, r),   # σ arriba
+        (vol_down, r),             # σ abajo (o σ sin mover si no cabe)
+        (sigma, r + GREEK_BUMP),   # r arriba
+        (sigma, r - GREEK_BUMP),   # r abajo
+    )
+    vol_up_price, vol_down_price, rate_up_price, rate_down_price = _batched_prices(
+        kind, S, K, q, T, steps, american, scenarios)
 
-    if sigma - GREEK_BUMP < MIN_VOL:
-        vega = price(sigma + GREEK_BUMP, r) - price(sigma, r)
+    if one_sided:
+        vega = vol_up_price - vol_down_price
     else:
-        vega = (price(sigma + GREEK_BUMP, r) - price(sigma - GREEK_BUMP, r)) / 2.0
-    rho = (price(sigma, r + GREEK_BUMP) - price(sigma, r - GREEK_BUMP)) / 2.0
+        vega = (vol_up_price - vol_down_price) / 2.0
+    rho = (rate_up_price - rate_down_price) / 2.0
 
     return {
         "delta": float(delta),
@@ -358,6 +477,22 @@ def _crr_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
     }
 
 
+# Orden de las griegas dentro de la tupla guardada en caché.
+GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
+
+
+@lru_cache(maxsize=GREEKS_CACHE_SIZE)
+def _cached_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
+                   T: float) -> tuple:
+    """Griegas americanas guardadas en caché como TUPLA (inmutable).
+
+    Clave: (kind, S, K, r, q, sigma, T). Las excepciones (T <= 0, sigma <= 0)
+    no se guardan: se vuelven a lanzar en cada llamada.
+    """
+    greeks = _crr_greeks(kind, S, K, r, q, sigma, T, CRR_PRICE_STEPS, True)
+    return tuple(greeks[name] for name in GREEK_NAMES)
+
+
 def crr_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
                T: float) -> dict:
     """Griegas americanas (por acción) con el árbol CRR de 500/501 pasos.
@@ -365,5 +500,9 @@ def crr_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float,
     Mismas claves y unidades que `bs_greeks`: delta, gamma, theta por día
     natural, vega y rho por 1 punto porcentual. Con T <= 0 o sigma <= 0
     lanza ValueError (no están definidas) y la interfaz muestra "—".
+    Se guardan en caché; cada llamada devuelve un diccionario NUEVO.
     """
-    return _crr_greeks(kind, S, K, r, q, sigma, T, CRR_PRICE_STEPS, True)
+    _check_kind(kind)
+    values = _cached_greeks(kind, float(S), float(K), float(r), float(q),
+                            float(sigma), float(T))
+    return dict(zip(GREEK_NAMES, values))

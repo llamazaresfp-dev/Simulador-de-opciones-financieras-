@@ -492,3 +492,57 @@ def test_precision_rule_keeps_normal_round_trips(kind, strike, sigma, days):
         return
     assert result.message is None
     assert result.vol == pytest.approx(sigma, abs=SIGMA_TOL)
+
+
+# --- Bloque 7: caché y tiempo de la IV americana (AC-B13) -------------------
+
+import sys  # noqa: E402
+import time  # noqa: E402
+
+from opciones import binomial as binomial_module  # noqa: E402
+
+IV_MODULE = sys.modules["opciones.implied_vol"]
+
+
+def clear_iv_caches():
+    binomial_module._cached_price.cache_clear()
+    IV_MODULE._cached_american_iv.cache_clear()
+
+
+def test_american_iv_cache_is_bounded():
+    assert 256 <= IV_MODULE._cached_american_iv.cache_info().maxsize <= 512
+
+
+@pytest.mark.parametrize("kind, strike, sigma, days", [
+    ("put", 100.0, 0.25, 45),
+    ("call", 110.0, 0.60, 365),
+    ("put", 140.0, 0.20, 365),     # prima = intrínseco: mensaje
+    ("call", 90.0, 0.25, 1),       # región mal condicionada
+])
+def test_cached_american_iv_equals_uncached(kind, strike, sigma, days):
+    market = make_market(days=days)
+    premium = tree_price(kind, market, strike, sigma)
+    clear_iv_caches()
+    uncached = IV_MODULE._american_iv_uncached(kind, strike, premium, market.spot,
+                                               market.rate, market.q, market.T)
+    first = implied_vol(option_leg(kind, strike, premium), market)
+    second = implied_vol(option_leg(kind, strike, premium), market)
+    assert first.message == uncached.message == second.message
+    if uncached.vol is None:
+        assert first.vol is None and second.vol is None
+    else:
+        assert first.vol == pytest.approx(uncached.vol, abs=1e-12)
+        assert second.vol == first.vol
+    # Cada llamada devuelve un objeto nuevo (no compartido desde la caché).
+    assert first is not second
+    assert IV_MODULE._cached_american_iv.cache_info().hits >= 1
+
+
+def test_american_iv_cold_is_fast():
+    market = make_market()
+    premium = tree_price("put", market, 95.0, 0.30)
+    clear_iv_caches()
+    start = time.perf_counter()
+    result = implied_vol(option_leg("put", 95.0, premium), market)
+    assert time.perf_counter() - start < 2.0
+    assert result.vol == pytest.approx(0.30, abs=SIGMA_TOL)

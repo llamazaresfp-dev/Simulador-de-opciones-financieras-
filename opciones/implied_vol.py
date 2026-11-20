@@ -18,11 +18,13 @@ La función nunca lanza excepciones: devuelve un número o un mensaje.
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 from scipy.optimize import brentq
 
+from opciones.binomial import crr_price
 from opciones.models import Leg, Market
-from opciones.pricing import OPTION_KINDS, bs_price, option_price, uses_binomial
+from opciones.pricing import OPTION_KINDS, bs_price, uses_binomial
 
 # Intervalo de búsqueda de σ: de 0,0001 % a 1000 % anual.
 VOL_LOW = 1e-6
@@ -77,6 +79,9 @@ AMERICAN_VEGA_BUMP = 1e-4
 # Equivale a exigir vega ≥ 0,005 / 0,05 = 0,1 por unidad de σ (por acción).
 PREMIUM_PRECISION = 0.005
 MAX_SIGMA_UNCERTAINTY = 0.05
+
+# Tamaño máximo de la caché de la IV americana (ver `_cached_american_iv`).
+AMERICAN_IV_CACHE_SIZE = 256
 
 
 @dataclass
@@ -165,7 +170,7 @@ def implied_vol(leg: Leg, market: Market) -> IVResult:
 # --- Rama americana (árbol binomial) ------------------------------------------
 
 
-def _american_bounds(kind: str, market: Market, strike: float) -> tuple[float, float]:
+def _american_bounds(kind: str, spot: float, strike: float) -> tuple[float, float]:
     """Límites (inferior, superior) de la prima de una opción AMERICANA.
 
     - Inferior = valor intrínseco SIN descontar: máx(S − K, 0) en la call y
@@ -178,13 +183,43 @@ def _american_bounds(kind: str, market: Market, strike: float) -> tuple[float, f
       supera esos valores.
     """
     if kind == "call":
-        return max(market.spot - strike, 0.0), market.spot
-    return max(strike - market.spot, 0.0), strike
+        return max(spot - strike, 0.0), spot
+    return max(strike - spot, 0.0), strike
 
 
 def _american_implied_vol(kind: str, strike: float, premium: float,
                           market: Market) -> IVResult:
-    """IV con el árbol americano (500/501 pasos promediados, vía `option_price`).
+    """IV con el árbol americano: pasa los datos a la versión con caché.
+
+    Cada IV americana son ~30 árboles de 500/501 pasos (caro). Streamlit
+    vuelve a ejecutar todo en cada clic, así que guardamos el resultado.
+    Devolvemos un IVResult NUEVO cada vez (la caché guarda una tupla
+    inmutable, nunca un objeto que alguien pudiera modificar).
+    """
+    vol, message = _cached_american_iv(
+        kind, float(strike), float(premium), float(market.spot), float(market.rate),
+        float(market.q), float(market.vol), float(market.T))
+    return IVResult(vol, message)
+
+
+@lru_cache(maxsize=AMERICAN_IV_CACHE_SIZE)
+def _cached_american_iv(kind: str, strike: float, premium: float, spot: float,
+                        rate: float, q: float, vol: float, T: float) -> tuple:
+    """IV americana guardada en caché como tupla (vol, mensaje).
+
+    Clave: (kind, strike, prima, S, r, q, vol, T). La vol del mercado no
+    cambia el resultado (la IV la busca brentq), pero forma parte de la
+    clave por sencillez: así la clave es "todos los datos del mercado".
+    El cálculo es puro (mismos datos, mismo resultado), por eso se puede
+    guardar sin cambiar nada de lo que devuelve.
+    """
+    result = _american_iv_uncached(kind, strike, premium, spot, rate, q, T)
+    return result.vol, result.message
+
+
+def _american_iv_uncached(kind: str, strike: float, premium: float, spot: float,
+                          rate: float, q: float, T: float) -> IVResult:
+    """IV con el árbol americano (500/501 pasos promediados, `crr_price`).
 
     Orden: límites americanos -> identificabilidad -> buscador (brentq) ->
     guarda de vega casi nula y regla de precisión en la σ encontrada.
@@ -198,7 +233,7 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     ni siquiera con la σ mínima el modelo baja hasta la prima (p. ej. una
     call ITM cuyo valor sin volatilidad, S − K·e^(−rT), ya supera la prima).
     """
-    lower, upper = _american_bounds(kind, market, strike)
+    lower, upper = _american_bounds(kind, spot, strike)
     # Tolerancia pequeña para no confundir ruido de redondeo con un precio real.
     tolerance = lower * 1e-6 + 1e-9
     if premium < lower - tolerance:
@@ -209,9 +244,13 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     if premium <= lower + tolerance:
         return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
 
+    def tree_price(sigma: float) -> float:
+        """Precio del árbol americano (el mismo que da `option_price`)."""
+        return crr_price(kind, spot, strike, rate, q, sigma, T)
+
     def gap(sigma: float) -> float:
         """Precio del árbol con σ menos la prima: buscamos el 0."""
-        return float(option_price(kind, market, strike, sigma=sigma)) - premium
+        return tree_price(sigma) - premium
 
     try:
         gap_low = gap(VOL_LOW)
@@ -239,7 +278,7 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     # vega ≤ 7e-11 y todas las correctas, ≥ 8,6e-9: con vega < 1e-6 decimos
     # que la IV no es identificable en vez de mostrar un número engañoso.
     try:
-        vega = _american_vega(kind, strike, vol, market)
+        vega = _american_vega(tree_price, vol)
     except (ValueError, RuntimeError, ArithmeticError):
         return IVResult(None, MSG_SOLVER_FAILED)
     if not math.isfinite(vega):
@@ -256,14 +295,14 @@ def _american_implied_vol(kind: str, strike: float, premium: float,
     return IVResult(float(vol), None)
 
 
-def _american_vega(kind: str, strike: float, sigma: float, market: Market) -> float:
+def _american_vega(tree_price, sigma: float) -> float:
     """Vega del árbol en σ, por unidad de σ (diferencia central).
 
     vega ≈ (precio(σ + h) − precio(σ − h)) / (2·h), con el mismo precio
-    promediado (500/501 pasos) que usa el buscador. Si σ es muy pequeña,
-    h se reduce a σ/2 para no pasar a una volatilidad negativa.
+    promediado (500/501 pasos) que usa el buscador (`tree_price`). Si σ es
+    muy pequeña, h se reduce a σ/2 para no pasar a una volatilidad negativa.
     """
     bump = min(AMERICAN_VEGA_BUMP, sigma / 2)
-    price_up = float(option_price(kind, market, strike, sigma=sigma + bump))
-    price_down = float(option_price(kind, market, strike, sigma=sigma - bump))
+    price_up = tree_price(sigma + bump)
+    price_down = tree_price(sigma - bump)
     return (price_up - price_down) / (2 * bump)

@@ -1,0 +1,4 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-20	3	0	3	0	ACTIVE	baseline	outer PVL first pass: Gate CONDITIONAL (C1 default_premium owner, C2 sys.modules test order, C3 AppTest lazy-tab)
+1	2026-11-20	3	0	3	3	ACTIVE	CONTINUE	supplement applied C1-C3; re-run PVL from V1
+2	2026-11-20	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation from V1: Gate PASS, C1-C3 resolved, no new findings

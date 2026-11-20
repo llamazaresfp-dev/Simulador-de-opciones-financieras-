@@ -161,7 +161,7 @@ def test_unknown_kind_raises():
 # --- Prima por defecto (AC4) -------------------------------------------
 
 def make_market(**changes):
-    data = dict(underlying="Acción", spot=100.0, vol=0.20, days=365, rate=0.05, q=0.0)
+    data = dict(underlying="Acción", spot=100.0, vol=0.20, days=365, rate=0.05, q=0.0, pricing_model="black_scholes")
     data.update(changes)
     return Market(**data)
 

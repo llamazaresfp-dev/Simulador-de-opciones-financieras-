@@ -43,7 +43,10 @@ RISK_NEUTRAL = SimulationSettings()  # mu = None
 
 def make_market(underlying="Acción", spot=100.0):
     """Mercado de referencia del SPEC: σ 25 %, 45 días, r 4 %, q 1 %."""
-    return Market(underlying=underlying, spot=spot, vol=0.25, days=45, rate=0.04, q=0.01)
+    # Etapa B1: fijado a Black-Scholes porque build_legs usa default_premium
+    # y las cifras de referencia (PoP, N(−d2)) son de primas BS.
+    return Market(underlying=underlying, spot=spot, vol=0.25, days=45, rate=0.04, q=0.01,
+                  pricing_model="black_scholes")
 
 
 MARKET = make_market()

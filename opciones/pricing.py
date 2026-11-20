@@ -9,7 +9,9 @@ Notación:
 - T: tiempo hasta el vencimiento en años.
 
 Black-Scholes es exacto para opciones europeas (índices). Para acciones
-y ETF (americanas) es solo una aproximación.
+y ETF (americanas) es solo una aproximación; por eso este módulo también
+tiene el "despachador" (`uses_binomial`, `option_price`), que elige entre
+Black-Scholes y el árbol binomial americano de `opciones.binomial`.
 """
 
 import math
@@ -17,7 +19,11 @@ import math
 import numpy as np
 from scipy.stats import norm
 
-from opciones.models import DAYS_PER_YEAR, Market
+from opciones.binomial import crr_price, crr_price_grid
+from opciones.models import DAYS_PER_YEAR, PRICING_BINOMIAL, Market
+
+# Subyacentes cuyas opciones son americanas (se pueden ejercer antes).
+AMERICAN_UNDERLYINGS = ("Acción", "ETF")
 
 OPTION_KINDS = ("call", "put")
 
@@ -145,8 +151,51 @@ def bs_greeks(kind: str, S: float, K: float, r: float, q: float, sigma: float, T
     }
 
 
+def uses_binomial(market: Market) -> bool:
+    """¿Hay que valorar con el árbol binomial americano?
+
+    Este es el ÚNICO sitio que decide el modelo, para que primas, curva
+    "hoy", griegas e IV usen siempre el mismo criterio.
+    - Acción/ETF: sus opciones son americanas; usamos el árbol si el
+      ajuste `pricing_model` es "binomial" (el valor por defecto).
+    - Índice: siempre Black-Scholes. Las opciones sobre índices (SPX,
+      NDX, RUT) son europeas, y para ellas Black-Scholes es exacto.
+    Cualquier otro valor (p. ej. un modelo desconocido) usa Black-Scholes.
+    """
+    return (market.underlying in AMERICAN_UNDERLYINGS
+            and market.pricing_model == PRICING_BINOMIAL)
+
+
+def option_price(kind: str, market: Market, strike: float, S=None, sigma=None):
+    """Precio por acción de una call o put con el modelo activo del mercado.
+
+    Despachador: en vez de llamar a `bs_price` en cada sitio, todo el motor
+    pasa por aquí, y así cambiar de modelo es cambiar un solo ajuste.
+    - S: spot (número o array); por defecto `market.spot`.
+    - sigma: volatilidad; por defecto `market.vol`.
+    - El tiempo es siempre `market.T` (con T = 0 ambos modelos dan el
+      valor intrínseco).
+    Con binomial: un número usa `crr_price` (500/501 pasos, preciso) y un
+    array usa `crr_price_grid` (200/201 pasos, más rápido para la curva).
+    Devuelve un float o un array, igual que `bs_price`.
+    """
+    _check_kind(kind)
+    if S is None:
+        S = market.spot
+    if sigma is None:
+        sigma = market.vol
+    if not uses_binomial(market):
+        return bs_price(kind, S, strike, market.rate, market.q, sigma, market.T)
+    if np.ndim(S) == 0:
+        return crr_price(kind, float(S), strike, market.rate, market.q, sigma, market.T)
+    return crr_price_grid(kind, S, strike, market.rate, market.q, sigma, market.T)
+
+
 def default_premium(kind: str, market: Market, strike) -> float:
-    """Prima sugerida para una pata nueva: precio Black-Scholes con los datos globales.
+    """Prima sugerida para una pata nueva: precio del modelo activo con los datos globales.
+
+    Binomial americano para Acción/ETF por defecto; Black-Scholes para
+    Índice o si se elige "black_scholes" (ver `option_price`).
 
     Devuelve 0.0 si el cálculo no es posible (por ejemplo, acciones,
     strike vacío o no positivo, o datos de mercado no numéricos).
@@ -156,7 +205,7 @@ def default_premium(kind: str, market: Market, strike) -> float:
     if strike is None or not strike > 0:
         return 0.0
     try:
-        price = bs_price(kind, market.spot, strike, market.rate, market.q, market.vol, market.T)
+        price = option_price(kind, market, strike)
     except (TypeError, ValueError):
         return 0.0
     if not math.isfinite(price):

@@ -33,7 +33,9 @@ DAYS = (1, 45)
 
 
 def make_market(days=45, vol=0.25, rate=RATE, q=Q, spot=SPOT):
-    return Market(underlying="Acción", spot=spot, vol=vol, days=days, rate=rate, q=q)
+    # Etapa B1: fijado a Black-Scholes (estos tests son la IV europea de la Etapa A).
+    return Market(underlying="Acción", spot=spot, vol=vol, days=days, rate=rate, q=q,
+                  pricing_model="black_scholes")
 
 
 def option_leg(kind, strike, premium):

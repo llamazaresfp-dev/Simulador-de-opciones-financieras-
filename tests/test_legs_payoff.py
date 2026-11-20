@@ -18,7 +18,8 @@ NO_FEES = CommissionSettings(per_contract=0.0, index_surcharge=0.0, include_clos
 
 
 def market(days=30, underlying="Acción"):
-    return Market(underlying=underlying, spot=100, vol=0.20, days=days, rate=0.05)
+    return Market(underlying=underlying, spot=100, vol=0.20, days=days, rate=0.05,
+                  pricing_model="black_scholes")  # Etapa B1: valores BS de la Etapa A
 
 
 # --- P&L al vencimiento por pata (AC5) ----------------------------------
@@ -167,7 +168,7 @@ def test_today_with_zero_days_is_intrinsic_minus_fees():
 # --- Griegas de posición (AC8 parcial) ----------------------------------
 
 def test_position_greeks_long_and_short_signs():
-    m = Market("Acción", spot=100, vol=0.20, days=365, rate=0.05)
+    m = Market("Acción", spot=100, vol=0.20, days=365, rate=0.05, pricing_model="black_scholes")
     ref = bs_greeks("call", 100, 100, 0.05, 0.0, 0.20, 1.0)
     long_g = position_greeks([Leg("call", 1, 2, 100, 10.0)], m)
     short_g = position_greeks([Leg("call", -1, 2, 100, 10.0)], m)

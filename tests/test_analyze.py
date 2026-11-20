@@ -30,7 +30,9 @@ NO_FEES = CommissionSettings(per_contract=0.0, index_surcharge=0.0, include_clos
 
 
 def market(**changes):
-    data = dict(underlying="Acción", spot=100.0, vol=0.20, days=30, rate=0.05, q=0.0)
+    # Etapa B1: fijado a Black-Scholes (números de referencia de la Etapa A).
+    data = dict(underlying="Acción", spot=100.0, vol=0.20, days=30, rate=0.05, q=0.0,
+                pricing_model="black_scholes")
     data.update(changes)
     return Market(**data)
 

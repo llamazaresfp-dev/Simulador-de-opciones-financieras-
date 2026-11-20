@@ -96,6 +96,26 @@ def test_european_tree_matches_black_scholes_sweep(kind, K, sigma, T, r, q):
     assert tree == pytest.approx(bs_price(kind, 100, K, r, q, sigma, T), abs=3e-3)
 
 
+@pytest.mark.parametrize("kind", ["call", "put"])
+@pytest.mark.parametrize("K", [80, 90, 100, 110, 120])
+@pytest.mark.parametrize("sigma", [0.10, 0.25, 0.50, 0.80])
+@pytest.mark.parametrize("T", [0.1, 0.5, 1.0, 2.0])
+@pytest.mark.parametrize("r, q", [(0.04, 0.01), (0.0, 0.0), (0.05, 0.03)])
+def test_averaged_european_price_matches_black_scholes_wide_range(kind, K, sigma, T, r, q):
+    # El precio que usa la app (media de 500 y 501 pasos) en versión europea
+    # frente a Black-Scholes, en un rango amplio (σ hasta 80 %, T hasta 2 años).
+    # Tolerancia escalada: el error del árbol crece con σ·raíz(T) (el paso
+    # del árbol en log-precio es σ·raíz(dt) y la "rejilla" alrededor del
+    # strike es más gruesa). Por eso usamos 3e-3 hasta σ·raíz(T) = 0,25
+    # (el rango del test de 1000 pasos) y lo ampliamos de forma proporcional
+    # por encima. Peor caso medido (20-11-26): put K=120, σ=80 %, T=2 años,
+    # r=q=0 → error 7,6e-3 frente a una tolerancia de 1,36e-2; la mayor
+    # proporción error/tolerancia es ≈ 0,70 (put K=110, σ=25 %, T=1, r=q=0).
+    price = crr_price(kind, 100, K, r, q, sigma, T, american=False)
+    tolerance = 3e-3 * max(1.0, sigma * math.sqrt(T) / 0.25)
+    assert price == pytest.approx(bs_price(kind, 100, K, r, q, sigma, T), abs=tolerance)
+
+
 @pytest.mark.parametrize("K", [90, 100, 110])
 @pytest.mark.parametrize("T", [45 / 365, 1.0])
 def test_american_call_without_dividend_equals_european(K, T):

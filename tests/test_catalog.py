@@ -39,7 +39,9 @@ UNDERLYINGS = ("Acción", "Índice")
 
 
 def market(spot=100.0, underlying="Acción", **changes):
-    data = dict(underlying=underlying, spot=spot, vol=0.20, days=30, rate=0.05, q=0.0)
+    # Etapa B1: fijado a Black-Scholes (primas de referencia de la Etapa A).
+    data = dict(underlying=underlying, spot=spot, vol=0.20, days=30, rate=0.05, q=0.0,
+                pricing_model="black_scholes")
     data.update(changes)
     return Market(**data)
 

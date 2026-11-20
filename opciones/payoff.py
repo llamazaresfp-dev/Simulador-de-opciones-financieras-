@@ -4,7 +4,9 @@ Fórmula de una pata (AC5):
     P&L = side × quantity × multiplier × (valor − price) − comisiones
 
 - "Al vencimiento": el valor de la opción es su valor intrínseco.
-- "Hoy": el valor de la opción es su precio Black-Scholes.
+- "Hoy": el valor de la opción es su precio con el modelo activo
+  (binomial americano para Acción/ETF por defecto, Black-Scholes para
+  Índice o si se elige; ver `option_price`).
 La estrategia es simplemente la suma de sus patas.
 
 Todas las funciones de P&L aceptan S como número o como array de numpy
@@ -15,7 +17,7 @@ import numpy as np
 
 from opciones.commissions import close_fee_expiry, close_fee_today, open_fee
 from opciones.models import CommissionSettings, Leg, Market
-from opciones.pricing import bs_greeks, bs_price
+from opciones.pricing import bs_greeks, bs_price, option_price
 
 GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
 
@@ -54,13 +56,14 @@ def leg_pnl_expiry(leg: Leg, market: Market, settings: CommissionSettings, S):
 def leg_pnl_today(leg: Leg, market: Market, settings: CommissionSettings, S):
     """P&L de una pata si cerramos hoy, con comisiones de apertura y cierre.
 
-    Con días = 0, bs_price devuelve el valor intrínseco (decisión 13).
+    El valor de la opción sale de `option_price` (modelo activo). Con
+    días = 0 ambos modelos devuelven el valor intrínseco (decisión 13).
     """
     S_arr = np.asarray(S, dtype=float)
     if leg.kind == "stock":
         value = S_arr
     else:
-        value = bs_price(leg.kind, S_arr, leg.strike, market.rate, market.q, market.vol, market.T)
+        value = option_price(leg.kind, market, leg.strike, S_arr)
     fees = open_fee(leg, market, settings) + close_fee_today(leg, market, settings)
     return _to_output(_gross_pnl(leg, value) - fees, S)
 

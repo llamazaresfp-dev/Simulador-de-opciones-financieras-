@@ -32,3 +32,7 @@ Hoy (decisión 6) la curva al vencimiento cobra la comisión de cierre en toda p
 ## Why deferred
 
 El usuario decidió durante EXECUTE mantener la decisión 6 tal cual para el MVP.
+
+## Nota Etapa B (20-11-26)
+
+La investigación de la Etapa B definió "racional" como abandonar si valor ≤ comisión (P&L continuo, sin salto), patas cortas sin cambio, como interruptor en Ajustes activado por defecto. El usuario ya aceptó estas decisiones para la Etapa B2, que sigue diferida.

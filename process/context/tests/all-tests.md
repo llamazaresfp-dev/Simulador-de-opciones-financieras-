@@ -10,7 +10,7 @@ metadata:
 
 # laboratorio-opciones - All Tests
 
-Last updated: 2026-11-20 (UPDATE PROCESS, Stage A closeout)
+Last updated: 2026-11-20 (UPDATE PROCESS, Stage B1 closeout)
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
@@ -70,7 +70,7 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 - Manual (user) checklist still covers visuals and cross-tab persistence of the Ajustes values: `.venv/bin/streamlit run app.py`.
 - The engine import must not pull in Streamlit: checked in a fresh subprocess in `tests/test_analyze.py`.
 
-### Test files (910 tests at Stage A close)
+### Test files (2330 passed + 2 skipped at Stage B1 close)
 
 | File | Covers |
 |---|---|
@@ -83,9 +83,16 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 | `tests/test_catalog.py` | 8 templates, `build_legs`, strike rounding tiers, book metrics per template |
 | `tests/test_implied_vol.py` | IV round trip (ATM/OTM/ITM, sigma 1 %-300 %, 1 and 45 days), bounds, premium 0, days 0, stock leg, never raises |
 | `tests/test_simulation.py` | exact PoP vs `scipy.integrate.quad`, N(d2) reference, PoP 0 and 1, Monte Carlo statistics, seed reproducibility, performance, exports |
-| `tests/test_app_smoke.py` | AppTest smoke of `app.py` |
+| `tests/test_binomial.py` | CRR pricer: Hull references (7.4284, 4.4885), European tree vs BS, scaled-tolerance test of the averaged European pricer, early-exercise premium, parity bounds, grid vs scalar, Greeks, edge cases, timing and cache-equality tests |
+| `tests/test_binomial_iv.py` | American IV round trip (price always; sigma only where vega > 0.01), identifiability/precision/vega-guard messages, Index/BS path equals Stage A IV, never raises, timing |
+| `tests/test_pricing_model.py` | dispatcher truth table, canary (default Market is binomial), Index identical under both selectors, expiry regression (P&L, metrics, exact PoP 0.5721, MC seed 42 identical), "hoy" curve bounds, position Greeks, timing |
+| `tests/test_app_smoke.py` | AppTest smoke of `app.py` (incl. Ajustes model radio, manual premium kept on toggle, reset-button labels, Index "no tiene efecto") |
 
 Notes: `test_validation.py` also covers `validate_simulation` and `scenario_warnings`; `test_analyze.py` checks that `opciones.implied_vol` and `opciones.simulation` import without Streamlit. Monte Carlo tests use tolerances of 4 standard errors and fixed seeds (deterministic, not flaky). Per-file commands: `.venv/bin/pytest tests/test_implied_vol.py -q`, `.venv/bin/pytest tests/test_simulation.py -q`.
+
+**Pinning convention (Stage B1):** the default `Market.pricing_model` is `"binomial"`, so tests whose expected numbers assume Black-Scholes premiums for Acción/ETF pin their `Market` helpers with `pricing_model="black_scholes"` (test_pricing.py: one line in `make_market`; also test_legs_payoff, test_simulation, test_implied_vol, test_analyze, test_catalog, and the smoke test where concrete premiums are asserted). Never change an expected number to make a test pass; pin the helper instead. Also run the full suite when a cross-cutting default changes (the emulation during VALIDATE found 5 hidden failures).
+
+**Timing tests (AC-B13):** loose `time.perf_counter` bounds: premium < 0.25 s, 401-point grid < 1.0 s, American IV < 2.0 s, iron condor `analyze` cold < 2.0 s and warm < 0.3 s. Cached results must equal uncached within 1e-12 and never return a shared mutable array. 2 legitimate skips (put at intrinsic; IV undefined).
 
 ## Default Verification Order
 
@@ -103,6 +110,7 @@ Unless the task clearly needs a different path:
 .venv/bin/pytest tests/test_app_smoke.py -q   # UI smoke (AppTest)
 .venv/bin/pytest -k bull_spread -v       # tests matching a name
 .venv/bin/pytest tests/test_simulation.py -q  # exact PoP + Monte Carlo (likewise test_implied_vol.py)
+.venv/bin/pytest tests/test_binomial.py tests/test_binomial_iv.py tests/test_pricing_model.py -q  # Stage B1
 ```
 
 One-time environment setup (already done; repeat only to rebuild `.venv/`):
@@ -131,4 +139,5 @@ python3 -m venv .venv
 - Cross-tab persistence of the Ajustes values and visual layout have no automated test (AppTest cannot cover lazy tabs/visuals); verified manually by the user at MVP close.
 - Monte Carlo tests prove exactness against independent oracles, not that lognormal/Black-Scholes describe real markets (warnings only). Histogram clipping at percentiles 0.5-99.5 % is a presentation choice. No browser performance test (engine time only).
 - Market-data code (v2) will need mocked yfinance responses; not designed yet.
-- Resolved: engine tests exist (910 incl. Stage A); UI smoke test exists (former gap G3).
+- Stage B1: the tree clips an American put at K while the no-vol path uses K*exp(-rT) > K for r < 0 on deep-ITM long-T puts (exotic inputs; no test asserts equality there); cold `analyze` of a 4-leg iron condor is ~0.8 s (only a regression bound, not a UX test). After engine changes restart any Streamlit dev server (stale imported modules) before manual checks.
+- Resolved: engine tests exist (2330 incl. Stage A and B1); UI smoke test exists (former gap G3).

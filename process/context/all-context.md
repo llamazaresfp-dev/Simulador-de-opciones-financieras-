@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-20 (UPDATE PROCESS, Stage A closeout)
+Last updated: 2026-11-20 (UPDATE PROCESS, Stage B1 closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,30 +145,36 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-MVP (v1) and Stage A (Monte Carlo + implied volatility) implemented. Layout:
+MVP (v1), Stage A (Monte Carlo + implied volatility) and Stage B1 (binomial American model) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
   requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest)
   app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes;
-                          "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación"
+                          "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación";
+                          Stage B1: Ajustes "Modelo de valoración" radio (binomial / Black-Scholes), premium-origin captions, active-model caption
   opciones/            -- calculation engine (pure Python, no Streamlit imports, no I/O)
     __init__.py        -- public API: models, bs_price/bs_greeks/default_premium, validate_*, market_warnings,
                           TEMPLATES/build_legs, analyze() -> Analysis; Stage A additions: implied_vol, IVResult,
-                          SimulationSettings, ScenarioResult, simulate_scenario, validate_simulation, scenario_warnings
-    models.py          -- Leg, Market, CommissionSettings, constants (MIN_VOL, OPTION_MULTIPLIER, DAYS_PER_YEAR)
-    pricing.py         -- Black-Scholes price + Greeks, default_premium
+                          SimulationSettings, ScenarioResult, simulate_scenario, validate_simulation, scenario_warnings;
+                          Stage B1 additions: crr_price, crr_price_grid, crr_greeks, option_price, option_greeks, uses_binomial
+    models.py          -- Leg, Market (last field `pricing_model`: "binomial" default | "black_scholes"), CommissionSettings,
+                          constants (MIN_VOL, OPTION_MULTIPLIER, DAYS_PER_YEAR, PRICING_*)
+    pricing.py         -- Black-Scholes price + Greeks, default_premium; dispatcher uses_binomial / option_price / option_greeks
+    binomial.py        -- CRR binomial tree (American), N/N+1 averaging, crr_price (500/501), crr_price_grid (200/201),
+                          crr_greeks, bounded lru_cache memoisation; pure, does not import pricing.py
     commissions.py     -- open_fee, close_fee_expiry, close_fee_today
     payoff.py          -- pnl_expiry, pnl_today, position_greeks, price_grid
     metrics.py         -- exact max profit/loss, breakevens, "unlimited" detection (kink-based, no grid scan)
     validation.py      -- validate_market, validate_legs, market_warnings (Spanish messages)
     catalog.py         -- 8 strategy templates + build_legs
-    implied_vol.py     -- implied_vol(leg, market) -> IVResult (brentq on Black-Scholes; Spanish messages, never raises)
+    implied_vol.py     -- implied_vol(leg, market) -> IVResult (brentq on Black-Scholes, or on crr_price for American Acción/ETF;
+                          Spanish messages, never raises)
     simulation.py      -- exact_pop (lognormal closed form), SimulationSettings, simulate_scenario (Monte Carlo)
-  tests/               -- pytest suite (9 test files + __init__.py, 910 tests): test_pricing, test_legs_payoff,
+  tests/               -- pytest suite (12 test files + __init__.py, 2330 passed + 2 skipped): test_pricing, test_legs_payoff,
                           test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
-                          test_implied_vol, test_simulation, test_app_smoke (AppTest)
+                          test_implied_vol, test_simulation, test_binomial, test_binomial_iv, test_pricing_model, test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
   .claude/ .codex/ .agents/  -- harness agents and skills (managed, do not edit)
 ```
@@ -193,6 +199,16 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Naming gotcha:** `opciones/__init__.py` exports the function `implied_vol`, which shadows the submodule attribute `opciones.implied_vol`. Use `from opciones import implied_vol`; the module is reachable via `sys.modules['opciones.implied_vol']`. `exact_pop` is not exported in `__init__`; import it from `opciones.simulation`.
 - **Streamlit pitfalls:** `st.metric` truncates long labels/values (seen twice) -- keep long text in markdown/caption; change widget state only in `on_click` callbacks before render (else `StreamlitWidgetAlreadyInstantiatedError`).
 
+## Stage B1 Behaviours Worth Knowing
+
+- **Dispatcher:** `uses_binomial(market)` is true only for Acción/ETF with `pricing_model == "binomial"` (default); Índice always stays Black-Scholes with identical numbers. Premiums, the "hoy" curve, Greeks and implied volatility of Acción/ETF come from the American CRR tree; P&L at expiry, metrics, exact PoP and Monte Carlo are unchanged (the scenarios warning says only the European-style lognormal terminal model remains).
+- **Decisions B1-B7 (summary):** CRR tree averaging N and N+1 steps (premium/Greeks 500/501, "hoy" grid 200/201 per B7); Black-Scholes selectable in Ajustes (manual premiums kept on toggle; reset button reads "↺ binomial" / "↺ BS" / "↺ spot"); tree Greeks from nodes (1,·),(2,·) with central vega/rho (unit "per 1 point"); active-model warnings (BS undervalues American puts, typical error 1-8 %, up to ~24 %); no new dependencies. Full text: `process/general-plans/completed/etapa-b1-binomial_20-11-26/`.
+- **Edge handling:** p outside [0,1] -> deterministic limit (not clipping); intrinsic floor only on American grids; if the tree cannot be built Greeks fall back to S/T nudges (finite); `T <= 0` or `sigma <= 0` handled before the tree.
+- **American IV rules:** brentq directly on `crr_price`; identifiability checked before brentq (premium = intrinsic -> not identifiable message; premium below intrinsic -> its own message; call premium >= S or put >= K -> "above" message); vega guard (vega < 1e-6 -> not identifiable); precision rule (sigma rejected when half a cent of premium would move sigma by more than 5 points, i.e. vega*0.05 < 0.005). Index or Black-Scholes keeps the Stage A IV path byte for byte.
+- **Caching/performance:** pure bounded `functools.lru_cache` (256-512) on `crr_price`, `crr_greeks`, the grid helper (key includes `S_array.tobytes()`) and the American IV branch; cached equals uncached within 1e-12; vega/rho shift trees batched in one induction loop. Measured: premium 0.018 s, 401-point grid ~0.13-0.16 s, Greeks per leg 0.047 s, American IV ~0.18 s, 4-leg iron condor `analyze` cold ~0.8 s / warm 0.002 s.
+- **Gotchas:** never export a function named `binomial` from `__init__.py` (it would shadow the submodule, same as `implied_vol`); Streamlit dev servers keep stale imported package modules, so restart the server after engine changes.
+- **Known gaps:** the tree clips an American put at K while the no-vol path uses K*exp(-rT) > K for r < 0 on deep-ITM long-T puts (exotic inputs; the tree value is the correct American bound); every spot/vol/days/strike edit is a cold ~0.8 s `analyze` for a 4-leg iron condor.
+
 ## Technology Stack
 
 - **Language:** Python 3.12.3 (system interpreter, `/usr/bin/python3`)
@@ -210,7 +226,7 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 
 **Units:** option contracts use a multiplier of 100; stock legs use multiplier 1 with quantity in shares. US market only.
 
-**Pricing:** exact intrinsic value at expiry; Black-Scholes (+ Greeks) before expiry. Exact for European options (indices), an approximation for American (stocks/ETFs) -- the UI must flag this.
+**Pricing:** exact intrinsic value at expiry; Black-Scholes (+ Greeks) before expiry. American CRR binomial tree for Acción/ETF by default (Black-Scholes selectable in Ajustes); Black-Scholes for indices (European). The UI flags the active model.
 
 **Commissions:** configurable, defaults USD 0.65 per contract, extra USD 0.60 per contract on index options, charged on open and close by default. Subtracted from P&L, so they move breakevens.
 
@@ -239,12 +255,13 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 
 - MVP (v1) complete and verified (plan archived in `process/general-plans/completed/mvp-laboratorio_20-11-26/`; AC1-AC18 met, 479 tests).
 - Stage A (Monte Carlo + implied volatility) complete and verified (`process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/`; AC-A1..AC-A17 met, 910 tests).
-- Next: Stage B per roadmap -- binomial model for American options; then roadmap v2 per `DISENO.md` (market data via yfinance, etc.) as new plans.
-- Backlog: rational close fee at expiry, to pair with Stage B (`process/general-plans/backlog/close-fee-rational-close_20-11-26.md`).
+- Stage B1 (binomial American model) complete and verified (`process/general-plans/completed/etapa-b1-binomial_20-11-26/`; AC-B1..AC-B16 met, 2330 passed + 2 skipped; closeout WITH_GAPS, see Stage B1 known gaps).
+- Stage B2 (rational close fee at expiry) deferred by the user; backlog item stays: `process/general-plans/backlog/close-fee-rational-close_20-11-26.md` (accepted decisions: abandon if value <= fee, short legs unchanged, toggle in Ajustes default on).
+- Next: Stage C -- real/historical data (market data via yfinance etc., per `DISENO.md` roadmap) as a new plan.
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20; refreshed at Stage A closeout (HEAD f154272)
+- Generated: 2026-11-20; refreshed at Stage B1 closeout (HEAD 0f28123)
 - Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

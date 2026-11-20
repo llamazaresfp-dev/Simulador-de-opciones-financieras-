@@ -12,6 +12,7 @@ from opciones.models import (
     Leg,
     Market,
 )
+from opciones.payoff import pnl_expiry, pnl_today, position_greeks, price_grid
 from opciones.pricing import bs_greeks, bs_price, default_premium
 
 __all__ = [
@@ -24,4 +25,8 @@ __all__ = [
     "bs_greeks",
     "bs_price",
     "default_premium",
+    "pnl_expiry",
+    "pnl_today",
+    "position_greeks",
+    "price_grid",
 ]

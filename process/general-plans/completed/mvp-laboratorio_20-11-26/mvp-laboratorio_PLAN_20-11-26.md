@@ -2,17 +2,17 @@
 name: mvp-laboratorio PLAN
 description: "Plan COMPLEX de implementación del MVP v1 de Laboratorio de Opciones en 6 bloques secuenciales, cada uno terminado en pytest verde."
 date: 20-11-26
-status: planned
+status: completed
 complexity: complex
-spec: process/general-plans/active/mvp-laboratorio_20-11-26/mvp-laboratorio_SPEC_20-11-26.md
+spec: process/general-plans/completed/mvp-laboratorio_20-11-26/mvp-laboratorio_SPEC_20-11-26.md
 ---
 
 # Plan: MVP (v1) de Laboratorio de Opciones
 
 **Date**: 20-11-26
 **Complexity**: COMPLEX (un solo plan, un solo flujo de ejecución, 6 bloques secuenciales)
-**Status**: ⏳ PLANNED
-**SPEC bloqueado**: `process/general-plans/active/mvp-laboratorio_20-11-26/mvp-laboratorio_SPEC_20-11-26.md` (AC1–AC18, decisiones 1–12, huecos G1–G5)
+**Status**: ✅ VERIFIED (MVP completo, archivado 20-11-26)
+**SPEC bloqueado**: `process/general-plans/completed/mvp-laboratorio_20-11-26/mvp-laboratorio_SPEC_20-11-26.md` (AC1–AC18, decisiones 1–12, huecos G1–G5)
 **Entorno**: Python 3.12.3, `.venv` (numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0)
 
 **TL;DR:** se construye primero un motor puro (`opciones/`, sin Streamlit) en 5 bloques con tests, y solo en el bloque 6 la interfaz `app.py`. Cada bloque termina con `.venv/bin/pytest -q` en verde antes de pasar al siguiente. Las dos decisiones nuevas del usuario (13: días = 0 permitido; 14: comisión de cierre en la curva "hoy") están integradas.
@@ -39,12 +39,12 @@ Contexto leído: `process/context/all-context.md`, `process/context/tests/all-te
 
 | Bloque | Contenido | Estado |
 |---|---|---|
-| 1 | `models.py` + `pricing.py` + tests + `requirements.txt` | ⏳ PLANNED |
-| 2 | `payoff.py` + `commissions.py` + tests | ⏳ PLANNED |
-| 3 | `metrics.py` + tests | ⏳ PLANNED |
-| 4 | `validation.py` + `analyze()` + tests | ⏳ PLANNED |
-| 5 | `catalog.py` + tests | ⏳ PLANNED |
-| 6 | `app.py` + smoke AppTest + revisión manual Hybrid | ⏳ PLANNED |
+| 1 | `models.py` + `pricing.py` + tests + `requirements.txt` | ✅ VERIFIED |
+| 2 | `payoff.py` + `commissions.py` + tests | ✅ VERIFIED |
+| 3 | `metrics.py` + tests | ✅ VERIFIED |
+| 4 | `validation.py` + `analyze()` + tests | ✅ VERIFIED |
+| 5 | `catalog.py` + tests | ✅ VERIFIED |
+| 6 | `app.py` + smoke AppTest + revisión manual Hybrid | ✅ VERIFIED |
 
 ## Decisiones bloqueadas (1–14)
 
@@ -110,11 +110,11 @@ Status meanings:
 - ✅ VERIFIED - Tested AND confirmed working
 - 🚧 BLOCKED - Has issues
 
-After each phase (block), document in the block's report (`process/general-plans/active/mvp-laboratorio_20-11-26/mvp-laboratorio_REPORT_20-11-26.md`, creado por EXECUTE; no por este plan):
-- [ ] What was tested manually
-- [ ] Values verified (consola `.venv/bin/python -c ...` + salida de pytest)
-- [ ] Errors encountered and fixed
-- [ ] User confirmation received
+After each phase (block), document in the block's report (`process/general-plans/completed/mvp-laboratorio_20-11-26/mvp-laboratorio_REPORT_20-11-26.md`, creado por EXECUTE; no por este plan):
+- [x] What was tested manually
+- [x] Values verified (consola `.venv/bin/python -c ...` + salida de pytest)
+- [x] Errors encountered and fixed
+- [x] User confirmation received
 
 Regla honesta de estado: un bloque con tests verdes y sin que el usuario lo haya revisado es `🔨 CODE DONE`, no `✅ VERIFIED`. Solo el usuario pasa un bloque a `✅ VERIFIED`.
 
@@ -198,62 +198,62 @@ Orden estricto; cada bloque termina con pytest verde. Reglas transversales: func
 
 **Explicación para el usuario:** aquí nace la "calculadora" de precios: guardamos los datos del mercado y de cada pata en pequeñas clases, y escribimos la fórmula de Black-Scholes con dividendo. Los tests comparan contra los números del libro de Hull (call 4,7594, put 0,8086…) para estar seguros de que la fórmula es correcta antes de construir nada encima.
 
-- [ ] Ejecutar `date +%d-%m-%y` y `.venv/bin/python -c "import numpy, scipy, plotly, streamlit, pytest; print(numpy.__version__, scipy.__version__, plotly.__version__, streamlit.__version__, pytest.__version__)"` para reconfirmar versiones.
-- [ ] Fijar `requirements.txt` con `numpy==2.5.5`, `scipy==1.18.1`, `plotly==7.1.0`, `streamlit==1.67.0`, `pytest==9.2.0` (decisión 11).
-- [ ] Crear `opciones/models.py`: `Leg`, `Market`, `CommissionSettings`, constantes (`MIN_VOL`, etc.).
-- [ ] Crear `opciones/pricing.py`: `bs_price` vectorizada en `S` (scipy.stats.norm), con guardas `T <= 0` y `sigma <= 0`; `bs_greeks` en unidades prácticas; nunca devolver NaN; `default_premium(kind, market, strike)` (usa `bs_price` con `market.spot`, `market.rate`, `market.q`, `market.vol`, `market.T`; devuelve 0 si el cálculo no es posible).
-- [ ] Crear/modificar `opciones/__init__.py` en este bloque: re-exportar `Leg`, `Market`, `CommissionSettings`, `bs_price`, `bs_greeks` y `default_premium`.
-- [ ] Crear `tests/test_pricing.py`: Hull (S=42, K=40, r=0,10, σ=0,20, T=0,5 → call 4,7594, put 0,8086, delta call 0,7791); S=K=100, r=0,05, σ=0,20, T=1, q=0 → call 10,4506, put 5,5735; greeks de referencia (delta 0,6368, gamma 0,018762, vega 0,3752, theta −0,01757/día, rho 0,5323); paridad put-call con q = 0 y q > 0 en varios casos; q distinto de 0 altera precio y delta (AC2); `T = 0` devuelve valor intrínseco; `sigma = 0` devuelve límite determinista sin NaN; `bs_greeks` lanza `ValueError` en `T = 0` y `sigma = 0`; `default_premium` igual a `bs_price` con los datos del `Market` y 0 si el cálculo no es posible (AC4); entradas array y escalar dan el mismo resultado; `S` muy pequeño o muy grande sin NaN.
-- [ ] Comando: `.venv/bin/pytest tests/test_pricing.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Ejecutar `date +%d-%m-%y` y `.venv/bin/python -c "import numpy, scipy, plotly, streamlit, pytest; print(numpy.__version__, scipy.__version__, plotly.__version__, streamlit.__version__, pytest.__version__)"` para reconfirmar versiones.
+- [x] Fijar `requirements.txt` con `numpy==2.5.5`, `scipy==1.18.1`, `plotly==7.1.0`, `streamlit==1.67.0`, `pytest==9.2.0` (decisión 11).
+- [x] Crear `opciones/models.py`: `Leg`, `Market`, `CommissionSettings`, constantes (`MIN_VOL`, etc.).
+- [x] Crear `opciones/pricing.py`: `bs_price` vectorizada en `S` (scipy.stats.norm), con guardas `T <= 0` y `sigma <= 0`; `bs_greeks` en unidades prácticas; nunca devolver NaN; `default_premium(kind, market, strike)` (usa `bs_price` con `market.spot`, `market.rate`, `market.q`, `market.vol`, `market.T`; devuelve 0 si el cálculo no es posible).
+- [x] Crear/modificar `opciones/__init__.py` en este bloque: re-exportar `Leg`, `Market`, `CommissionSettings`, `bs_price`, `bs_greeks` y `default_premium`.
+- [x] Crear `tests/test_pricing.py`: Hull (S=42, K=40, r=0,10, σ=0,20, T=0,5 → call 4,7594, put 0,8086, delta call 0,7791); S=K=100, r=0,05, σ=0,20, T=1, q=0 → call 10,4506, put 5,5735; greeks de referencia (delta 0,6368, gamma 0,018762, vega 0,3752, theta −0,01757/día, rho 0,5323); paridad put-call con q = 0 y q > 0 en varios casos; q distinto de 0 altera precio y delta (AC2); `T = 0` devuelve valor intrínseco; `sigma = 0` devuelve límite determinista sin NaN; `bs_greeks` lanza `ValueError` en `T = 0` y `sigma = 0`; `default_premium` igual a `bs_price` con los datos del `Market` y 0 si el cálculo no es posible (AC4); entradas array y escalar dan el mismo resultado; `S` muy pequeño o muy grande sin NaN.
+- [x] Comando: `.venv/bin/pytest tests/test_pricing.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** todos los tests verdes; los valores de referencia coinciden con `pytest.approx` (tolerancia de 4 decimales en precios del libro).
 
 ### Bloque 2 — Patas, P&L y comisiones (AC3, AC4, AC5, AC9 parcial, AC13, AC14 parcial)
 
 **Explicación para el usuario:** una "pata" es una compra o venta de una opción (o de acciones). Aquí calculamos cuánto gana o pierde cada pata al vencimiento y "hoy", y le restamos las comisiones. Las comisiones se calculan en un único sitio para que gráfico y métricas coincidan siempre.
 
-- [ ] Crear `opciones/commissions.py`: `open_fee`, `close_fee_expiry` (ITM estricta), `close_fee_today` (decisión 14); recargo de índice solo si `market.underlying == "Índice"`; acciones pagan 0.
-- [ ] Crear `opciones/payoff.py`: `pnl_expiry` y `pnl_today` por pata y de estrategia (comisiones restadas dentro); `position_greeks`; `price_grid`.
-- [ ] Crear `tests/test_commissions.py`: 0,65 USD por contrato por defecto; +0,60 en Índice (1 contrato = 1,25 por tramo); `quantity = 3` triplica; acción = 0; `include_close = False` → solo apertura; call S = K → sin comisión de cierre; call S = K + 0,01 → con cierre; put S = K − 0,01 → con cierre; vence sin valor → sin cierre; **curva "hoy" cobra cierre en toda pata de opción incluso muy OTM (decisión 14)**.
-- [ ] Crear `tests/test_legs_payoff.py`: P&L por pata long/short call, put, acción con comisiones a cero (fórmula AC5); multiplicador 100 vs 1; prima editada se usa en el P&L (AC4); la prima por defecto (`default_premium`, definida en el bloque 1) se usa al crear patas (AC4); suma de patas igual a `pnl_expiry` de la estrategia (AC9); `price_grid` cubre todos los strikes aunque estén lejos del ±30 %, incluye los strikes y strikes ± 1e-9 (AC9); `pnl_today` con `days = 0` igual al valor intrínseco menos comisiones (AC1 parcial); `position_greeks` con signos long/short, delta de acción ±quantity, resto 0, y `None` con `days = 0` (AC8 parcial).
-- [ ] Comando: `.venv/bin/pytest tests/test_legs_payoff.py tests/test_commissions.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Crear `opciones/commissions.py`: `open_fee`, `close_fee_expiry` (ITM estricta), `close_fee_today` (decisión 14); recargo de índice solo si `market.underlying == "Índice"`; acciones pagan 0.
+- [x] Crear `opciones/payoff.py`: `pnl_expiry` y `pnl_today` por pata y de estrategia (comisiones restadas dentro); `position_greeks`; `price_grid`.
+- [x] Crear `tests/test_commissions.py`: 0,65 USD por contrato por defecto; +0,60 en Índice (1 contrato = 1,25 por tramo); `quantity = 3` triplica; acción = 0; `include_close = False` → solo apertura; call S = K → sin comisión de cierre; call S = K + 0,01 → con cierre; put S = K − 0,01 → con cierre; vence sin valor → sin cierre; **curva "hoy" cobra cierre en toda pata de opción incluso muy OTM (decisión 14)**.
+- [x] Crear `tests/test_legs_payoff.py`: P&L por pata long/short call, put, acción con comisiones a cero (fórmula AC5); multiplicador 100 vs 1; prima editada se usa en el P&L (AC4); la prima por defecto (`default_premium`, definida en el bloque 1) se usa al crear patas (AC4); suma de patas igual a `pnl_expiry` de la estrategia (AC9); `price_grid` cubre todos los strikes aunque estén lejos del ±30 %, incluye los strikes y strikes ± 1e-9 (AC9); `pnl_today` con `days = 0` igual al valor intrínseco menos comisiones (AC1 parcial); `position_greeks` con signos long/short, delta de acción ±quantity, resto 0, y `None` con `days = 0` (AC8 parcial).
+- [x] Comando: `.venv/bin/pytest tests/test_legs_payoff.py tests/test_commissions.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** verde; al menos un caso calculado a mano por regla de comisión.
 
 ### Bloque 3 — Métricas exactas al vencimiento (AC10, AC11, AC12, AC14 parcial)
 
 **Explicación para el usuario:** el beneficio y la pérdida máximos no se estiman mirando el gráfico, se calculan exactamente: el P&L al vencimiento son tramos rectos que cambian de pendiente en los strikes. Evaluamos esos tramos y detectamos si la cola crece sin límite ("ilimitado"). Las comisiones hacen un pequeño escalón en cada strike y el cálculo lo respeta.
 
-- [ ] Crear `opciones/metrics.py` con el algoritmo fijado: `kinks = [0] + strikes únicos ordenados`; para cada intervalo evaluar `pnl_expiry` en dos puntos interiores → pendiente e intersección (misma función de P&L, comisiones incluidas); cola derecha con `Kmax + 1` y `Kmax + 2`; pendiente de cola > 0 → beneficio "ilimitado"; < 0 → pérdida "ilimitada"; lado izquierdo acotado (S >= 0).
-- [ ] Máx./mín.: valores alcanzados en S = 0, en cada K (`pnl_expiry(K)`) y en extremos de intervalos acotados (límites laterales de tramos contiguos).
-- [ ] Breakevens: raíces dentro de cada tramo abierto; en un strike, reportar K si los límites izquierdo/derecho tienen signo opuesto (cruce por salto) o `P(K) == 0`; deduplicar con tolerancia; tramo plano en cero → sin breakeven interior.
-- [ ] Crear `tests/test_metrics.py` (valores de libro, comisiones a cero): long call (pérdida = prima×100, beneficio ilimitado, 1 breakeven K + prima); long put (no ilimitado); short call (pérdida ilimitada); short put (no ilimitado); straddle (beneficio ilimitado, 2 breakevens); bull call spread (nunca pierde más de lo pagado; AC10); bear put spread; iron condor (2 breakevens, pérdida máx. acotada); covered call; protective put; sin breakeven (p. ej. P&L siempre positivo); varios breakevens.
-- [ ] Casos de comisión **calculados a mano** (1 contrato por pata, 0,65 USD, incluir cierre activo; el EXECUTE reconfirma las cuentas al escribir el test):
+- [x] Crear `opciones/metrics.py` con el algoritmo fijado: `kinks = [0] + strikes únicos ordenados`; para cada intervalo evaluar `pnl_expiry` en dos puntos interiores → pendiente e intersección (misma función de P&L, comisiones incluidas); cola derecha con `Kmax + 1` y `Kmax + 2`; pendiente de cola > 0 → beneficio "ilimitado"; < 0 → pérdida "ilimitada"; lado izquierdo acotado (S >= 0).
+- [x] Máx./mín.: valores alcanzados en S = 0, en cada K (`pnl_expiry(K)`) y en extremos de intervalos acotados (límites laterales de tramos contiguos).
+- [x] Breakevens: raíces dentro de cada tramo abierto; en un strike, reportar K si los límites izquierdo/derecho tienen signo opuesto (cruce por salto) o `P(K) == 0`; deduplicar con tolerancia; tramo plano en cero → sin breakeven interior.
+- [x] Crear `tests/test_metrics.py` (valores de libro, comisiones a cero): long call (pérdida = prima×100, beneficio ilimitado, 1 breakeven K + prima); long put (no ilimitado); short call (pérdida ilimitada); short put (no ilimitado); straddle (beneficio ilimitado, 2 breakevens); bull call spread (nunca pierde más de lo pagado; AC10); bear put spread; iron condor (2 breakevens, pérdida máx. acotada); covered call; protective put; sin breakeven (p. ej. P&L siempre positivo); varios breakevens.
+- [x] Casos de comisión **calculados a mano** (1 contrato por pata, 0,65 USD, incluir cierre activo; el EXECUTE reconfirma las cuentas al escribir el test):
   - Call corto K=100, prima 2,00: beneficio máx. 199,35 (alcanzado en S ≤ 100; salto de −0,65 justo por encima de K), pérdida ilimitada, breakeven ≈ 101,987.
-  - Bull call spread largo 100 @ 3,00 / corto 110 @ 1,00: pérdida máx. −201,30; **beneficio máx. 798,05 alcanzado exactamente en S = 110** (el corto no es ITM estricto en K; a la derecha la meseta es 797,40); breakeven ≈ 102,0195. Comisiones a cero: beneficio 800, pérdida 200, breakeven 102.
+  - Bull call spread largo 100 @ 3,00 / corto 110 @ 1,00: pérdida máx. −201,95 (corregido en UPDATE PROCESS: justo por encima de S = 100 el call largo es ITM estricto y paga la comisión de cierre de 0,65; −201,30 es solo P(100)); **beneficio máx. 798,05 alcanzado exactamente en S = 110** (el corto no es ITM estricto en K; a la derecha la meseta es 797,40); breakeven ≈ 102,0195. Comisiones a cero: beneficio 800, pérdida 200, breakeven 102.
   - Condor corto put 95 @ 1,50 / largo put 90 @ 0,50 / corto call 105 @ 1,50 / largo call 110 @ 0,50: sin comisiones → beneficio 200, pérdida 300, breakevens 93 y 107; con comisiones → beneficio 197,40 (meseta 95–105), pérdida −303,90, breakevens ≈ 93,0325 y ≈ 106,9675.
-- [ ] Escenarios límite: un solo strike; dos patas en el mismo strike (deduplicar kinks); solo patas de acción (sin strikes, pendiente única); estrategia con P&L plano (sin breakeven); P&L exactamente 0 en un strike; strikes muy próximos (tolerancia); pata de acción + opción (covered call).
-- [ ] Comando: `.venv/bin/pytest tests/test_metrics.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Escenarios límite: un solo strike; dos patas en el mismo strike (deduplicar kinks); solo patas de acción (sin strikes, pendiente única); estrategia con P&L plano (sin breakeven); P&L exactamente 0 en un strike; strikes muy próximos (tolerancia); pata de acción + opción (covered call).
+- [x] Comando: `.venv/bin/pytest tests/test_metrics.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** verde; el AC10 "bull spread nunca pierde más de lo pagado" se prueba con comisiones a cero.
 
 ### Bloque 4 — Validación y `analyze()` (AC1, AC17, AC18 parcial, decisión 13)
 
 **Explicación para el usuario:** antes de calcular nada, comprobamos que los datos tienen sentido y, si no, devolvemos un mensaje claro en español. También creamos `analyze()`, la única función que la interfaz llamará para obtener gráfico, métricas y griegas de golpe.
 
-- [ ] Crear `opciones/validation.py`: `validate_market`, `validate_legs`, `market_warnings`, con mensajes en español y la regla de la decisión 13 (días = 0 es aviso, no error).
-- [ ] Completar `opciones/__init__.py`: exponer `validate_market`, `validate_legs`, `market_warnings`, `analyze`, `Analysis`, modelos y `CommissionSettings`; verificar que `default_premium` (re-exportada desde el bloque 1) sigue en la API pública.
-- [ ] Implementar `analyze()` encadenando `price_grid` → `pnl_expiry`/`pnl_today` → `compute_metrics` → `position_greeks` → total de comisiones.
-- [ ] Crear `tests/test_validation.py`: días < 0 → error; días = 0 → sin error + aviso informativo; vol = 0, vol < `MIN_VOL`, vol negativa → error; spot, strike, prima, cantidad negativos o `None`/vacíos → error; spot = 0 → error; estrategia sin patas → mensaje claro; avisos por subyacente (Acción/ETF → aproximación americana con énfasis en puts y "~7 %"; Índice → europea; siempre "no es asesoría"); los mensajes son texto en español no vacío.
-- [ ] Crear `tests/test_analyze.py`: `analyze()` con días = 0 → curva "hoy" = intrínseco, griegas `None`; con días > 0 → griegas presentes; curvas sin NaN en todo el grid (incl. vol cerca de `MIN_VOL` y T muy pequeño); el motor se importa sin Streamlit en un intérprete nuevo, independiente del orden de tests: `subprocess.run([sys.executable, "-c", "import opciones, sys; assert 'streamlit' not in sys.modules"], check=True)` (no se usa `sys.modules` del proceso de pytest); curva al vencimiento de `analyze()` = suma de patas.
-- [ ] Comando: `.venv/bin/pytest tests/test_validation.py tests/test_analyze.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Crear `opciones/validation.py`: `validate_market`, `validate_legs`, `market_warnings`, con mensajes en español y la regla de la decisión 13 (días = 0 es aviso, no error).
+- [x] Completar `opciones/__init__.py`: exponer `validate_market`, `validate_legs`, `market_warnings`, `analyze`, `Analysis`, modelos y `CommissionSettings`; verificar que `default_premium` (re-exportada desde el bloque 1) sigue en la API pública.
+- [x] Implementar `analyze()` encadenando `price_grid` → `pnl_expiry`/`pnl_today` → `compute_metrics` → `position_greeks` → total de comisiones.
+- [x] Crear `tests/test_validation.py`: días < 0 → error; días = 0 → sin error + aviso informativo; vol = 0, vol < `MIN_VOL`, vol negativa → error; spot, strike, prima, cantidad negativos o `None`/vacíos → error; spot = 0 → error; estrategia sin patas → mensaje claro; avisos por subyacente (Acción/ETF → aproximación americana con énfasis en puts y "~7 %"; Índice → europea; siempre "no es asesoría"); los mensajes son texto en español no vacío.
+- [x] Crear `tests/test_analyze.py`: `analyze()` con días = 0 → curva "hoy" = intrínseco, griegas `None`; con días > 0 → griegas presentes; curvas sin NaN en todo el grid (incl. vol cerca de `MIN_VOL` y T muy pequeño); el motor se importa sin Streamlit en un intérprete nuevo, independiente del orden de tests: `subprocess.run([sys.executable, "-c", "import opciones, sys; assert 'streamlit' not in sys.modules"], check=True)` (no se usa `sys.modules` del proceso de pytest); curva al vencimiento de `analyze()` = suma de patas.
+- [x] Comando: `.venv/bin/pytest tests/test_validation.py tests/test_analyze.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** verde; ningún camino de entradas inválidas lanza excepción hacia fuera.
 
 ### Bloque 5 — Catálogo de 8 estrategias (AC15, AC16 motor)
 
 **Explicación para el usuario:** cada estrategia del catálogo es una "plantilla": un texto explicativo en español y una lista de patas descritas en porcentaje respecto al spot. `build_legs` convierte la plantilla en patas reales redondeando los strikes a valores razonables y calculando la prima con Black-Scholes.
 
-- [ ] Crear `opciones/catalog.py`: `Template` (key, nombre, visión de mercado, qué apuesta, beneficio/pérdida máx., cuándo usarla, riesgos, y especificaciones de pata: kind, side, `strike_offset_pct`, quantity); exactamente 8 plantillas (long call, long put, covered call, protective put, bull call spread, bear put spread, long straddle, iron condor); textos en español dentro del módulo.
-- [ ] `build_legs(template, market)`: redondeo de strikes por tramos (0,5 bajo 25; 1 bajo 100; 2,5 bajo 250; 5 bajo 1000; 5 o más por encima), primas con `default_premium` (BS), patas de acción de 100 acciones a precio = spot; strikes ordenados y coherentes (p. ej. bull spread: strike largo < strike corto).
-- [ ] Crear `tests/test_catalog.py`: exactamente 8 claves esperadas; todos los campos de texto presentes y no vacíos; `build_legs` produce patas válidas (`validate_legs` sin errores) para spots 20, 99, 100, 250, 1000 y 4500 e `Índice`/`Acción`; redondeo por tramos en los límites (24,9 / 25 / 99,9 / 100 / 249 / 250 / 999 / 1000); métricas de libro por plantilla vía `analyze()` (comisiones a cero y con valores por defecto): long call/put, covered call (beneficio acotado, pérdida muy grande), protective put (pérdida acotada), bull call spread, bear put spread, straddle (2 breakevens, beneficio ilimitado), iron condor (2 breakevens); strikes distintos tras el redondeo incluso con spot bajo (sin patas degeneradas).
-- [ ] Comando: `.venv/bin/pytest tests/test_catalog.py -q` y luego `.venv/bin/pytest -q`.
+- [x] Crear `opciones/catalog.py`: `Template` (key, nombre, visión de mercado, qué apuesta, beneficio/pérdida máx., cuándo usarla, riesgos, y especificaciones de pata: kind, side, `strike_offset_pct`, quantity); exactamente 8 plantillas (long call, long put, covered call, protective put, bull call spread, bear put spread, long straddle, iron condor); textos en español dentro del módulo.
+- [x] `build_legs(template, market)`: redondeo de strikes por tramos (0,5 bajo 25; 1 bajo 100; 2,5 bajo 250; 5 bajo 1000; 5 o más por encima), primas con `default_premium` (BS), patas de acción de 100 acciones a precio = spot; strikes ordenados y coherentes (p. ej. bull spread: strike largo < strike corto).
+- [x] Crear `tests/test_catalog.py`: exactamente 8 claves esperadas; todos los campos de texto presentes y no vacíos; `build_legs` produce patas válidas (`validate_legs` sin errores) para spots 20, 99, 100, 250, 1000 y 4500 e `Índice`/`Acción`; redondeo por tramos en los límites (24,9 / 25 / 99,9 / 100 / 249 / 250 / 999 / 1000); métricas de libro por plantilla vía `analyze()` (comisiones a cero y con valores por defecto): long call/put, covered call (beneficio acotado, pérdida muy grande), protective put (pérdida acotada), bull call spread, bear put spread, straddle (2 breakevens, beneficio ilimitado), iron condor (2 breakevens); strikes distintos tras el redondeo incluso con spot bajo (sin patas degeneradas).
+- [x] Comando: `.venv/bin/pytest tests/test_catalog.py -q` y luego `.venv/bin/pytest -q`.
 - **Pass criteria:** verde; cada plantilla produce métricas coherentes con su descripción textual.
 
 ### Bloque 6 — Interfaz Streamlit `app.py` (AC3, AC9, AC14, AC16, AC17 interfaz; AC18)
@@ -262,15 +262,15 @@ Orden estricto; cada bloque termina con pytest verde. Reglas transversales: func
 
 Antes de escribir (EXECUTE): invocar `vc-frontend-design` para decisiones de maquetación y `vc-docs-seeker` para confirmar `st.tabs(..., key=, on_change="rerun")` y el comportamiento de pestañas perezosas y `persist_state` (parámetro de widgets como `number_input`, `selectbox`, `radio`, `segmented_control`, `checkbox`, con valores "page", "session" o None; NO de `st.tabs`) en Streamlit 1.67.0. Comprobaciones de solo lectura con `.venv/bin/python -c ...` permitidas.
 
-- [ ] Barra lateral (siempre renderizada): subyacente (Acción/ETF/Índice), spot, volatilidad (%), días, tipo (%), dividend yield q (defecto 0). Mostrar errores (`validate_market`) y avisos (`market_warnings`) y no llamar a `analyze()` si hay errores.
-- [ ] Navegación: `st.tabs(["Catálogo","Constructor","Ajustes"], key="main_tab", on_change="rerun")`; el botón "abrir en el constructor" fija `st.session_state["main_tab"] = "Constructor"` dentro de su callback (verificado en 1.67). Fallback documentado: radio/segmented control si las pestañas fallan.
-- [ ] Estado: `st.session_state.legs` como lista de dicts con `id` monotónico y bandera `premium_manual`; el `on_change` del input de prima fija `premium_manual = True`; las primas no manuales se reescriben con el valor BS en cada rerun; botón "↺ BS" por fila restablece; las primas manuales se conservan al cambiar los datos globales.
-- [ ] Ajustes: valores de comisión y `legs` en entradas simples de `st.session_state` actualizadas por callbacks (`on_change`), nunca solo como estado interno de widgets de pestañas; los datos de mercado viven en la barra lateral (siempre renderizada). Opcional: `persist_state="session"` en los widgets de Ajustes como refuerzo. La persistencia entre pestañas perezosas solo se prueba de verdad con el ítem 9 de la checklist manual.
-- [ ] Constructor: filas por pata (tipo, dirección, strike, cantidad, prima, quitar) + "+ añadir pata"; gráfico Plotly: vencimiento línea sólida, "hoy" discontinua, línea de cero, marcador de spot, marcadores de breakevens; `st.plotly_chart(fig, width="stretch")`; métricas ("ilimitado" cuando proceda), tabla de griegas ("—" con días = 0) y total de comisiones.
-- [ ] Avisos visibles: "no es asesoría"; aproximación americana (más fuerte en puts) para Acción/ETF; nota europea para Índice; nota corta "comisión de cierre solo si la opción vence con valor"; aviso informativo con días = 0.
-- [ ] Crear `tests/test_app_smoke.py` con `streamlit.testing.v1.AppTest`: la app carga sin excepción; "abrir" una plantilla del catálogo rellena `legs` y cambia a "Constructor"; los valores de comisión de `session_state` se aplican al resultado (cambiar `per_contract` por callback cambia el total de comisiones) — este test NO prueba persistencia entre pestañas, porque AppTest ejecuta el cuerpo de todas las pestañas; días = 0 produce aviso (no error) y la app no falla; con vol = 0 hay mensaje de error y no hay gráfico.
-- [ ] Comandos: `.venv/bin/pytest tests/test_app_smoke.py -q`, luego `.venv/bin/pytest -q` (puerta AC18), luego revisión manual con `.venv/bin/streamlit run app.py`.
-- [ ] **Checklist de revisión manual (criterios Hybrid, la hace el usuario):** (1) la app abre con tres pestañas en español; (2) mensajes de error legibles con vol = 0 y días < 0; (3) con días = 0 aparece el aviso y la curva "hoy" coincide con la de vencimiento (valor intrínseco menos comisiones); (4) añadir/quitar patas call/put/acción funciona; (5) la prima nueva coincide con BS y al editarla no se pisa al cambiar el spot; (6) el gráfico muestra las dos curvas, cero, spot y breakevens, con el salto de comisión visible; (7) "ilimitado" aparece en long call y call corto; (8) cada una de las 8 plantillas se abre en el constructor con gráfico y métricas; (9) Ajustes cambia el resultado y persiste al cambiar de pestaña (única prueba de la persistencia entre pestañas perezosas, no la cubre AppTest); (10) avisos visibles según Acción/ETF/Índice y "no es asesoría".
+- [x] Barra lateral (siempre renderizada): subyacente (Acción/ETF/Índice), spot, volatilidad (%), días, tipo (%), dividend yield q (defecto 0). Mostrar errores (`validate_market`) y avisos (`market_warnings`) y no llamar a `analyze()` si hay errores.
+- [x] Navegación: `st.tabs(["Catálogo","Constructor","Ajustes"], key="main_tab", on_change="rerun")`; el botón "abrir en el constructor" fija `st.session_state["main_tab"] = "Constructor"` dentro de su callback (verificado en 1.67). Fallback documentado: radio/segmented control si las pestañas fallan.
+- [x] Estado: `st.session_state.legs` como lista de dicts con `id` monotónico y bandera `premium_manual`; el `on_change` del input de prima fija `premium_manual = True`; las primas no manuales se reescriben con el valor BS en cada rerun; botón "↺ BS" por fila restablece; las primas manuales se conservan al cambiar los datos globales.
+- [x] Ajustes: valores de comisión y `legs` en entradas simples de `st.session_state` actualizadas por callbacks (`on_change`), nunca solo como estado interno de widgets de pestañas; los datos de mercado viven en la barra lateral (siempre renderizada). Opcional: `persist_state="session"` en los widgets de Ajustes como refuerzo. La persistencia entre pestañas perezosas solo se prueba de verdad con el ítem 9 de la checklist manual.
+- [x] Constructor: filas por pata (tipo, dirección, strike, cantidad, prima, quitar) + "+ añadir pata"; gráfico Plotly: vencimiento línea sólida, "hoy" discontinua, línea de cero, marcador de spot, marcadores de breakevens; `st.plotly_chart(fig, width="stretch")`; métricas ("ilimitado" cuando proceda), tabla de griegas ("—" con días = 0) y total de comisiones.
+- [x] Avisos visibles: "no es asesoría"; aproximación americana (más fuerte en puts) para Acción/ETF; nota europea para Índice; nota corta "comisión de cierre solo si la opción vence con valor"; aviso informativo con días = 0.
+- [x] Crear `tests/test_app_smoke.py` con `streamlit.testing.v1.AppTest`: la app carga sin excepción; "abrir" una plantilla del catálogo rellena `legs` y cambia a "Constructor"; los valores de comisión de `session_state` se aplican al resultado (cambiar `per_contract` por callback cambia el total de comisiones) — este test NO prueba persistencia entre pestañas, porque AppTest ejecuta el cuerpo de todas las pestañas; días = 0 produce aviso (no error) y la app no falla; con vol = 0 hay mensaje de error y no hay gráfico.
+- [x] Comandos: `.venv/bin/pytest tests/test_app_smoke.py -q`, luego `.venv/bin/pytest -q` (puerta AC18), luego revisión manual con `.venv/bin/streamlit run app.py`.
+- [x] **Checklist de revisión manual (criterios Hybrid, la hace el usuario):** (1) la app abre con tres pestañas en español; (2) mensajes de error legibles con vol = 0 y días < 0; (3) con días = 0 aparece el aviso y la curva "hoy" coincide con la de vencimiento (valor intrínseco menos comisiones); (4) añadir/quitar patas call/put/acción funciona; (5) la prima nueva coincide con BS y al editarla no se pisa al cambiar el spot; (6) el gráfico muestra las dos curvas, cero, spot y breakevens, con el salto de comisión visible; (7) "ilimitado" aparece en long call y call corto; (8) cada una de las 8 plantillas se abre en el constructor con gráfico y métricas; (9) Ajustes cambia el resultado y persiste al cambiar de pestaña (única prueba de la persistencia entre pestañas perezosas, no la cubre AppTest); (10) avisos visibles según Acción/ETF/Índice y "no es asesoría".
 - **Pass criteria:** `.venv/bin/pytest -q` verde y la checklist manual aprobada por el usuario antes de marcar `✅ VERIFIED`.
 
 ## Verification Evidence
@@ -364,11 +364,11 @@ Heredado del SPEC: datos de mercado en vivo/yfinance, cadenas de opciones, volat
 
 ## Resume and Execution Handoff
 
-1. **Selected plan file path:** `process/general-plans/active/mvp-laboratorio_20-11-26/mvp-laboratorio_PLAN_20-11-26.md`
-2. **Last completed phase or step:** PLAN escrito (todos los bloques ⏳ PLANNED); ningún código creado.
-3. **Validate-contract status:** pending (lo escribe `vc-validate-agent`; no se simula en este plan).
+1. **Selected plan file path:** `process/general-plans/completed/mvp-laboratorio_20-11-26/mvp-laboratorio_PLAN_20-11-26.md` (archivado)
+2. **Last completed phase or step:** TODOS los bloques ✅ VERIFIED; plan archivado en `process/general-plans/completed/` (ver Current Execution State).
+3. **Validate-contract status:** PASS (ver `## Validate Contract`).
 4. **Supporting context files loaded:** el SPEC bloqueado, `DISENO.md`, `process/context/all-context.md`, `process/context/tests/all-tests.md`, `process/development-protocols/plan-lifecycle.md`, `process/development-protocols/implementation-standards.md`, `.claude/skills/vc-generate-plan/references/example-complex-prd.md`.
-5. **Next step for a fresh agent:** ejecutar VALIDATE sobre este plan (escribir `## Validate Contract`); después EXECUTE bloque 1 (`requirements.txt`, `opciones/models.py`, `opciones/pricing.py`, `tests/test_pricing.py`), correr `.venv/bin/pytest -q`, registrar en el reporte y pasar al bloque 2. No empezar un bloque con el anterior en rojo. Releer este plan y el reporte tras cualquier compactación.
+5. **Next step for a fresh agent:** nada pendiente en este plan; ver `## Next Step`.
 
 Envelope de contexto: feature: none → phase: PLAN → session-goal: plan del MVP en 6 bloques → branch: main → worktree: raíz del repo → context-group: all-context + all-tests → blast-radius-packages: `opciones/`, `tests/`, `app.py`, `requirements.txt` → active-plan: este archivo → test-runner: pytest → validate-contract: pending.
 
@@ -466,10 +466,33 @@ Hard stop conditions / safety constraints:
 - Do not start a block with the previous block's pytest red.
 - Never mark a block VERIFIED without the user's confirmation; Hybrid criteria need the user's manual checklist.
 - Do not add dependencies beyond the pinned five; no network, secrets, or file I/O in the engine.
-Next phase: EXECUTE: process/general-plans/active/mvp-laboratorio_20-11-26/mvp-laboratorio_PLAN_20-11-26.md
+Next phase: EXECUTE: process/general-plans/completed/mvp-laboratorio_20-11-26/mvp-laboratorio_PLAN_20-11-26.md
 Validate contract: inline in plan
 Execute start: `.venv/bin/pytest tests/test_pricing.py -q` then `.venv/bin/pytest -q` | e2e: none | probe: `.venv/bin/streamlit run app.py` (manual) | high-risk pack: no
 
+## Current Execution State
+
+**COMPLETE (20-11-26).** Los 6 bloques están implementados, cada uno confirmado por una ejecución EVL independiente de vc-tester y aprobado por el usuario; checklist manual de 10 ítems completada por el usuario ("Todo bien"). AC1–AC18 cumplidos. Suite final: 479/479, smoke AppTest 6/6.
+
+| Bloque | Commit | Tests acumulados |
+|---|---|---|
+| 1 | 5918b13 | 23 |
+| 2 | ac75c6d | 60 |
+| 3 | ee8e46e | 91 |
+| 4 | ce52faf | 166 |
+| 5 | c7ac737 | 473 |
+| 6 | 2c18510 | 479 |
+
+SPEC/plan: c08f263.
+
+## Lessons Learned and Deviations (UPDATE PROCESS)
+
+- **Corrección numérica del plan:** el bull call spread calculado a mano (100 @ 3 / 110 @ 1, comisiones por defecto) tiene pérdida máx. −201,95, no −201,30: justo por encima de S = 100 el call largo es ITM estricto y paga la comisión de cierre (0,65); −201,30 es solo P(100). Texto del bloque 3 corregido.
+- **Decisión 6 se mantiene** (el usuario la confirmó durante EXECUTE). Refinamiento posible movido al backlog: `process/general-plans/backlog/close-fee-rational-close_20-11-26.md`.
+- **Elecciones no especificadas en el plan, aceptadas por el usuario:** rejilla de precios spot ±30 % ampliada 10 % más allá de los strikes extremos, 401 puntos; griegas `None` con vol <= 0; paso de strike 10 por encima de 1000; separación de strikes en colisión dentro del catálogo; prima 0 permitida, strike > 0; tipo y q negativos permitidos; `commission_total` = apertura + cierre (include_close); la app arranca con un call largo ATM; botón de reinicio de spot "↺ spot"; `persist_state` no se usó.
+- **EVL ciclo 1 del bloque 6:** `st.metric` truncaba los breakevens (AC12); se movieron a una línea markdown propia y se añadió un test de regresión AppTest. Lección: la revisión visual en navegador detecta defectos que AppTest no ve.
+- **Pendiente solo manual:** la persistencia entre pestañas perezosas no tiene test automático (ítem 9 de la checklist manual, pasado por el usuario).
+
 ## Next Step
 
-RIPER-5: **ENTER VALIDATE MODE** sobre este plan (vc-validate-agent redacta el Validate Contract con las puertas de la sección Verification Evidence). Después, **ENTER EXECUTE MODE** para el bloque 1.
+MVP cerrado. Siguiente: roadmap v2 según `DISENO.md` (datos de mercado con yfinance, etc.) en un plan nuevo; opcionalmente el ítem de backlog de comisión de cierre racional.

@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-20 (vc-setup STUDY)
+Last updated: 2026-11-20 (UPDATE PROCESS, MVP closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,21 +145,41 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-Greenfield project: the design is written, no engine code yet. Planned layout (MVP):
+MVP (v1) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
-  requirements.txt     -- Python dependencies (unpinned for now)
-  opciones/            -- calculation engine (pure Python, no UI code)
-    __init__.py
-    (planned) legs/strategy, pricing (Black-Scholes + Greeks), metrics, commissions, catalog
-  tests/               -- pytest suite for the engine
-    __init__.py
-  (planned) app.py     -- Streamlit web app (UI only, calls opciones/)
+  requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest)
+  app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes
+  opciones/            -- calculation engine (pure Python, no Streamlit imports, no I/O)
+    __init__.py        -- public API: models, bs_price/bs_greeks/default_premium, validate_*, market_warnings,
+                          TEMPLATES/build_legs, analyze() -> Analysis
+    models.py          -- Leg, Market, CommissionSettings, constants (MIN_VOL, OPTION_MULTIPLIER, DAYS_PER_YEAR)
+    pricing.py         -- Black-Scholes price + Greeks, default_premium
+    commissions.py     -- open_fee, close_fee_expiry, close_fee_today
+    payoff.py          -- pnl_expiry, pnl_today, position_greeks, price_grid
+    metrics.py         -- exact max profit/loss, breakevens, "unlimited" detection (kink-based, no grid scan)
+    validation.py      -- validate_market, validate_legs, market_warnings (Spanish messages)
+    catalog.py         -- 8 strategy templates + build_legs
+  tests/               -- pytest suite (7 test files + __init__.py): test_pricing, test_legs_payoff,
+                          test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
+                          test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
   .claude/ .codex/ .agents/  -- harness agents and skills (managed, do not edit)
 ```
+
+Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.analyze(market, legs, settings)` returns an `Analysis` (grid, expiry_curve, today_curve, metrics, greeks, commission_total).
+
+## Engine Behaviours Worth Knowing
+
+- **Expiry vs "today" commissions:** the expiry curve charges the close fee only on strictly ITM option legs (so a jump of one fee appears just above/below a strike); the "today" curve charges open + close on every option leg when `include_close` is on (decisions 6 and 14 of the MVP plan). `commission_total = open + close` when `include_close`.
+- **days = 0 is allowed** (info warning, "today" curve = intrinsic value, Greeks `None`, shown as "—"); blocking errors only for days < 0, vol < `MIN_VOL` (0.0001), negative/empty spot, strike, premium or quantity. Greeks are also `None` when vol <= 0.
+- **Price grid:** spot ±30 %, widened 10 % beyond the outer strikes, 401 points; always includes each strike and strike ± 1e-9.
+- **Catalog:** strike step by tier (0.5 below 25, 1 below 100, 2.5 below 250, 5 below 1000, 10 above 1000); colliding strikes are nudged apart. App starts with one ATM long call. Premium 0 and negative rate/q are allowed; strike must be > 0.
+- **Premiums:** non-manual premiums are rewritten with the Black-Scholes value on every rerun; a manual edit sets `premium_manual` and is kept (button "↺ BS" resets, "↺ spot" resets the stock price).
+- **Breakevens** are rendered on their own markdown line (not `st.metric`, which truncates long values).
+- Backlog idea: charge the expiry close fee only if option value exceeds the fee -- `process/general-plans/backlog/close-fee-rational-close_20-11-26.md`.
 
 ## Technology Stack
 
@@ -192,23 +212,26 @@ laboratorio-opciones/
 
 ## Environment and Configuration
 
-**Config files:** `requirements.txt` (dependencies), `.gitignore`. No env vars, secrets or external services in the MVP.
+**Config files:** `requirements.txt` (pinned dependencies), `.gitignore`. No env vars, secrets or external services in the MVP.
 
 **v2 (planned):** yfinance needs no API key. Index option data (SPX/NDX/RUT) may be incomplete on Yahoo; fallback to equivalent ETFs (SPY/QQQ/IWM).
 
 ## Source References
 
 - `DISENO.md` -- product design doc (Spanish): scope, decisions and rationale
-- `requirements.txt` -- dependencies
+- `requirements.txt` -- pinned dependencies
+- `opciones/__init__.py` -- engine public API
+- `app.py` -- Streamlit UI
 
 ## Open Questions / Outstanding Work
 
-- Engine code not started: MVP implementation pending via RIPER-5.
+- MVP (v1) complete and verified (plan archived in `process/general-plans/completed/mvp-laboratorio_20-11-26/`; AC1-AC18 met, 479 tests).
+- Next: roadmap v2 per `DISENO.md` (market data via yfinance, etc.) as a new plan.
+- Backlog: rational close fee at expiry (`process/general-plans/backlog/close-fee-rational-close_20-11-26.md`).
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20
-- HEAD: none (fresh repo, no commits yet)
-- Mode: Flow A (new project), fresh scaffold
+- Generated: 2026-11-20; refreshed at MVP closeout (HEAD 2c18510)
+- Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

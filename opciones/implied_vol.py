@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from scipy.optimize import brentq
 
 from opciones.models import Leg, Market
-from opciones.pricing import OPTION_KINDS, bs_price
+from opciones.pricing import OPTION_KINDS, bs_price, option_price, uses_binomial
 
 # Intervalo de búsqueda de σ: de 0,0001 % a 1000 % anual.
 VOL_LOW = 1e-6
@@ -46,6 +46,20 @@ MSG_SOLVER_FAILED = (
     "No se encontró una volatilidad implícita entre 0,0001 % y 1000 % para esta prima."
 )
 MSG_INVALID_DATA = "Faltan datos o no son válidos para calcular la volatilidad implícita."
+
+# Mensajes propios del modelo americano (árbol binomial, Acción/ETF).
+MSG_AMERICAN_NOT_IDENTIFIABLE = (
+    "No se puede identificar la IV: con esta prima el precio del modelo no "
+    "depende de la volatilidad (ejercicio anticipado óptimo)."
+)
+MSG_AMERICAN_BELOW_INTRINSIC = (
+    "La prima está por debajo del valor intrínseco (lo que se cobra ejerciendo hoy): "
+    "una opción americana no puede valer menos, no existe volatilidad implícita."
+)
+
+# Precisión del buscador en la rama americana: cada evaluación es un árbol
+# de 500/501 pasos (caro), así que no pedimos 1e-14 como con Black-Scholes.
+AMERICAN_XTOL = 1e-8
 
 
 @dataclass
@@ -104,6 +118,11 @@ def implied_vol(leg: Leg, market: Market) -> IVResult:
     if leg.strike <= 0 or market.spot <= 0:
         return IVResult(None, MSG_INVALID_DATA)
 
+    # Acción/ETF con el modelo binomial: la IV se calcula con el árbol americano,
+    # el mismo modelo que da la prima. Índice o "black_scholes": sigue igual.
+    if uses_binomial(market):
+        return _american_implied_vol(leg.kind, leg.strike, premium, market)
+
     # Primero los límites: si la prima está fuera, no hay σ posible.
     lower, upper = _no_arbitrage_bounds(leg.kind, market, leg.strike)
     if premium <= lower:
@@ -122,5 +141,75 @@ def implied_vol(leg: Leg, market: Market) -> IVResult:
     try:
         vol = brentq(gap, VOL_LOW, VOL_HIGH, xtol=1e-14, rtol=1e-14)
     except (ValueError, RuntimeError):
+        return IVResult(None, MSG_SOLVER_FAILED)
+    return IVResult(float(vol), None)
+
+
+# --- Rama americana (árbol binomial) ------------------------------------------
+
+
+def _american_bounds(kind: str, market: Market, strike: float) -> tuple[float, float]:
+    """Límites (inferior, superior) de la prima de una opción AMERICANA.
+
+    - Inferior = valor intrínseco SIN descontar: máx(S − K, 0) en la call y
+      máx(K − S, 0) en la put. ¿Por qué sin descontar? Porque una opción
+      americana se puede ejercer HOY: si valiera menos que el intrínseco,
+      comprarla y ejercerla al momento daría dinero gratis. En la europea
+      solo se cobra al vencimiento, por eso allí el límite va descontado.
+    - Superior = S para la call (nunca vale más que la acción) y K para la
+      put (lo máximo que se puede cobrar es el strike). El árbol nunca
+      supera esos valores.
+    """
+    if kind == "call":
+        return max(market.spot - strike, 0.0), market.spot
+    return max(strike - market.spot, 0.0), strike
+
+
+def _american_implied_vol(kind: str, strike: float, premium: float,
+                          market: Market) -> IVResult:
+    """IV con el árbol americano (500/501 pasos promediados, vía `option_price`).
+
+    Orden: límites americanos -> identificabilidad -> buscador (brentq).
+
+    ¿Por qué algunas primas no tienen IV identificable? En una opción
+    americana muy dentro del dinero lo óptimo es ejercer ya, y entonces su
+    precio es exactamente el intrínseco para muchas σ distintas: el precio
+    "no se mueve" con σ. Si la prima está en ese tramo plano, cualquier σ
+    pequeña la explica igual de bien, así que no hay UNA respuesta: lo
+    decimos con un mensaje en vez de inventar un número. Lo mismo pasa si
+    ni siquiera con la σ mínima el modelo baja hasta la prima (p. ej. una
+    call ITM cuyo valor sin volatilidad, S − K·e^(−rT), ya supera la prima).
+    """
+    lower, upper = _american_bounds(kind, market, strike)
+    # Tolerancia pequeña para no confundir ruido de redondeo con un precio real.
+    tolerance = lower * 1e-6 + 1e-9
+    if premium < lower - tolerance:
+        return IVResult(None, MSG_AMERICAN_BELOW_INTRINSIC)
+    if premium >= upper:
+        return IVResult(None, MSG_ABOVE_UPPER_BOUND)
+    # Prima (casi) igual al intrínseco: precio plano en σ.
+    if premium <= lower + tolerance:
+        return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
+
+    def gap(sigma: float) -> float:
+        """Precio del árbol con σ menos la prima: buscamos el 0."""
+        return float(option_price(kind, market, strike, sigma=sigma)) - premium
+
+    try:
+        gap_low = gap(VOL_LOW)
+        gap_high = gap(VOL_HIGH)
+        if not (math.isfinite(gap_low) and math.isfinite(gap_high)):
+            return IVResult(None, MSG_SOLVER_FAILED)
+        # Con la σ mínima el modelo ya vale la prima o más: no hay tramo
+        # donde σ explique la prima (precio plano / dominado por el ejercicio).
+        if gap_low >= 0:
+            return IVResult(None, MSG_AMERICAN_NOT_IDENTIFIABLE)
+        # Ni con σ = 1000 % se alcanza la prima: fuera del intervalo de búsqueda.
+        if gap_high < 0:
+            return IVResult(None, MSG_SOLVER_FAILED)
+        vol = brentq(gap, VOL_LOW, VOL_HIGH, xtol=AMERICAN_XTOL)
+    except (ValueError, RuntimeError, ArithmeticError):
+        return IVResult(None, MSG_SOLVER_FAILED)
+    if not math.isfinite(vol):
         return IVResult(None, MSG_SOLVER_FAILED)
     return IVResult(float(vol), None)

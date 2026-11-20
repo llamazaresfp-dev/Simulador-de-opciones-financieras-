@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from opciones.catalog import TEMPLATES, LegSpec, Template, build_legs
 from opciones.commissions import close_fee_today, open_fee
 from opciones.metrics import Metrics, compute_metrics
 from opciones.models import (
@@ -81,12 +82,16 @@ __all__ = [
     "DAYS_PER_YEAR",
     "MIN_VOL",
     "OPTION_MULTIPLIER",
+    "TEMPLATES",
     "Analysis",
     "CommissionSettings",
     "Leg",
+    "LegSpec",
     "Market",
     "Metrics",
+    "Template",
     "analyze",
+    "build_legs",
     "bs_greeks",
     "bs_price",
     "compute_metrics",

@@ -19,7 +19,7 @@ import math
 import numpy as np
 from scipy.stats import norm
 
-from opciones.binomial import crr_price, crr_price_grid
+from opciones.binomial import crr_greeks, crr_price, crr_price_grid
 from opciones.models import DAYS_PER_YEAR, PRICING_BINOMIAL, Market
 
 # Subyacentes cuyas opciones son americanas (se pueden ejercer antes).
@@ -189,6 +189,21 @@ def option_price(kind: str, market: Market, strike: float, S=None, sigma=None):
     if np.ndim(S) == 0:
         return crr_price(kind, float(S), strike, market.rate, market.q, sigma, market.T)
     return crr_price_grid(kind, S, strike, market.rate, market.q, sigma, market.T)
+
+
+def option_greeks(kind: str, market: Market, strike: float) -> dict:
+    """Griegas por acción de una call o put con el modelo activo del mercado.
+
+    Despachador de griegas (como `option_price` para el precio):
+    - Acción/ETF con "binomial": griegas del árbol americano (`crr_greeks`).
+    - Índice o "black_scholes": `bs_greeks`, idénticas a la Etapa A.
+    Mismas claves y unidades en ambos casos (theta por día; vega y rho
+    por 1 punto). Con T <= 0 o vol <= 0 lanza ValueError.
+    """
+    _check_kind(kind)
+    if not uses_binomial(market):
+        return bs_greeks(kind, market.spot, strike, market.rate, market.q, market.vol, market.T)
+    return crr_greeks(kind, market.spot, strike, market.rate, market.q, market.vol, market.T)
 
 
 def default_premium(kind: str, market: Market, strike) -> float:

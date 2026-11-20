@@ -14,10 +14,18 @@ import numpy as np
 import pytest
 
 from opciones import TEMPLATES, CommissionSettings, Leg, Market, build_legs, compute_metrics
-from opciones.binomial import crr_price, crr_price_grid
+from opciones.binomial import crr_greeks, crr_price, crr_price_grid
 from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES
-from opciones.payoff import leg_pnl_today, pnl_expiry, pnl_today, price_grid
-from opciones.pricing import bs_price, default_premium, option_price, uses_binomial
+from opciones import analyze
+from opciones.payoff import GREEK_NAMES, leg_pnl_today, pnl_expiry, pnl_today, position_greeks, price_grid
+from opciones.pricing import (
+    bs_greeks,
+    bs_price,
+    default_premium,
+    option_greeks,
+    option_price,
+    uses_binomial,
+)
 from opciones.simulation import SimulationSettings, exact_pop, simulate_scenario
 
 FEES = CommissionSettings()  # 0,65 USD por contrato, cierre incluido
@@ -226,3 +234,101 @@ def test_monte_carlo_seed_42_identical_between_models():
     assert (first.p5, first.p50, first.p95) == (second.p5, second.p50, second.p95)
     np.testing.assert_array_equal(first.hist_counts, second.hist_counts)
     np.testing.assert_array_equal(first.hist_edges, second.hist_edges)
+
+
+# --- AC-B8: griegas según el modelo (bloque 3) ------------------------------
+
+def crr_greeks_of(kind, market, strike):
+    """Griegas del árbol directas, sin pasar por el despachador."""
+    return crr_greeks(kind, market.spot, strike, market.rate, market.q, market.vol, market.T)
+
+
+def bs_greeks_of(kind, market, strike):
+    """Griegas Black-Scholes directas, sin pasar por el despachador."""
+    return bs_greeks(kind, market.spot, strike, market.rate, market.q, market.vol, market.T)
+
+
+@pytest.mark.parametrize("kind, strike", [("call", 95.0), ("put", 105.0)])
+def test_option_greeks_binomial_uses_tree(kind, strike):
+    market = make_market()
+    assert option_greeks(kind, market, strike) == crr_greeks_of(kind, market, strike)
+
+
+@pytest.mark.parametrize("underlying, model", [
+    ("Índice", PRICING_BINOMIAL),
+    ("Índice", PRICING_BLACK_SCHOLES),
+    ("Acción", PRICING_BLACK_SCHOLES),
+    ("ETF", PRICING_BLACK_SCHOLES),
+])
+@pytest.mark.parametrize("kind, strike", [("call", 95.0), ("put", 105.0)])
+def test_option_greeks_black_scholes_identical_to_stage_a(underlying, model, kind, strike):
+    market = make_market(underlying, model)
+    assert option_greeks(kind, market, strike) == bs_greeks_of(kind, market, strike)
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("changes", [dict(days=0), dict(vol=0.0)])
+def test_option_greeks_undefined_raise_value_error(model, changes):
+    with pytest.raises(ValueError):
+        option_greeks("call", make_market(model=model, **changes), 100.0)
+
+
+def test_option_greeks_rejects_invalid_kind():
+    with pytest.raises(ValueError):
+        option_greeks("stock", make_market(), 100.0)
+
+
+def test_binomial_position_greeks_are_sum_of_legs():
+    market = make_market()
+    legs = [
+        Leg("put", 1, 2, 95.0, 1.0),
+        Leg("call", -1, 3, 105.0, 1.0),
+        Leg("stock", 1, 50, None, 100.0),
+    ]
+    put_g = crr_greeks_of("put", market, 95.0)
+    call_g = crr_greeks_of("call", market, 105.0)
+    total = position_greeks(legs, market)
+    for name in GREEK_NAMES:
+        expected = put_g[name] * 1 * 2 * 100 + call_g[name] * (-1) * 3 * 100
+        if name == "delta":
+            expected += 50  # la acción solo aporta delta: ±cantidad
+        assert total[name] == pytest.approx(expected, rel=1e-12, abs=1e-12)
+
+
+def test_binomial_position_greeks_stock_leg_only_delta():
+    total = position_greeks([Leg("stock", -1, 40, None, 100.0)], make_market())
+    assert total == {"delta": -40.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0, "rho": 0.0}
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("changes", [dict(days=0), dict(vol=0.0)])
+def test_position_greeks_none_without_time_or_volatility(model, changes):
+    legs = [Leg("put", 1, 1, 100.0, 3.0), Leg("stock", 1, 100, None, 100.0)]
+    total = position_greeks(legs, make_market(model=model, **changes))
+    assert total == {name: None for name in GREEK_NAMES}
+
+
+@pytest.mark.parametrize("underlying, model", [
+    ("Índice", PRICING_BINOMIAL),
+    ("Índice", PRICING_BLACK_SCHOLES),
+    ("Acción", PRICING_BLACK_SCHOLES),
+])
+def test_black_scholes_position_greeks_identical_to_stage_a(underlying, model):
+    market = make_market(underlying, model)
+    legs = [Leg("put", 1, 2, 95.0, 1.0), Leg("call", -1, 1, 105.0, 1.0)]
+    put_g = bs_greeks_of("put", market, 95.0)
+    call_g = bs_greeks_of("call", market, 105.0)
+    total = position_greeks(legs, market)
+    for name in GREEK_NAMES:
+        # Mismo orden de suma que la Etapa A: igualdad exacta.
+        expected = 0.0
+        expected += put_g[name] * (1 * 2 * 100)
+        expected += call_g[name] * (-1 * 1 * 100)
+        assert total[name] == expected
+
+
+def test_analyze_greeks_equal_position_greeks_with_binomial():
+    market = make_market()
+    legs = build_legs(iron_condor(), market)
+    result = analyze(market, legs, FEES)
+    assert result.greeks == position_greeks(legs, market)

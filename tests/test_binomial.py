@@ -20,18 +20,21 @@ import pytest
 from opciones.binomial import (
     CRR_GRID_STEPS,
     CRR_PRICE_STEPS,
+    _crr_greeks,
     _crr_values,
     _effective_steps,
+    crr_greeks,
     crr_price,
     crr_price_grid,
 )
 from opciones.models import (
+    MIN_VOL,
     PRICING_BINOMIAL,
     PRICING_BLACK_SCHOLES,
     PRICING_MODELS,
     Market,
 )
-from opciones.pricing import bs_price
+from opciones.pricing import bs_greeks, bs_price
 
 BINOMIAL_SOURCE = pathlib.Path(__file__).resolve().parent.parent / "opciones" / "binomial.py"
 
@@ -256,6 +259,99 @@ def test_short_maturity_caps_steps():
 def test_invalid_kind_raises():
     with pytest.raises(ValueError):
         crr_price("stock", 100, 100, 0.04, 0.0, 0.2, 0.5)
+
+
+# --- AC-B8: griegas del árbol (bloque 3) -----------------------------------
+
+GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
+
+# Put de referencia del SPEC: S = K = 100, r 4 %, q 1 %, σ 25 %, T = 182,5 días.
+REF_PUT = ("put", 100.0, 100.0, 0.04, 0.01, 0.25, 182.5 / 365)
+
+
+def test_crr_greeks_returns_the_five_greeks():
+    greeks = crr_greeks(*REF_PUT)
+    assert set(greeks) == set(GREEK_NAMES)
+    assert all(isinstance(value, float) and math.isfinite(value) for value in greeks.values())
+
+
+def test_crr_greeks_reference_put():
+    # Cifras recalculadas con estas entradas exactas (N = 500/501 promediados):
+    # delta −0,44217, gamma 0,023314, theta −0,015628/día,
+    # vega 0,27639 y rho −0,19487 por punto (desplazamientos centrales ±0,01).
+    greeks = crr_greeks(*REF_PUT)
+    assert greeks["delta"] == pytest.approx(-0.44217, abs=5e-4)
+    assert greeks["gamma"] == pytest.approx(0.023314, abs=2e-4)
+    assert greeks["theta"] == pytest.approx(-0.015628, abs=5e-4)
+    assert greeks["vega"] == pytest.approx(0.27639, abs=5e-3)
+    assert greeks["rho"] == pytest.approx(-0.19487, abs=1e-3)
+
+
+def test_crr_rho_is_close_to_spec_value():
+    # El SPEC cita −0,1897 (probablemente con un desplazamiento unilateral);
+    # el central da −0,1949. La diferencia cabe en 1e-2.
+    assert crr_greeks(*REF_PUT)["rho"] == pytest.approx(-0.1897, abs=1e-2)
+
+
+@pytest.mark.parametrize("kind", ["call", "put"])
+@pytest.mark.parametrize("K", [80.0, 100.0, 120.0])
+@pytest.mark.parametrize("sigma, T", [(0.15, 30 / 365), (0.30, 0.5), (0.50, 2.0)])
+def test_crr_greeks_signs_and_ranges(kind, K, sigma, T):
+    greeks = crr_greeks(kind, 100.0, K, 0.04, 0.01, sigma, T)
+    if kind == "call":
+        assert -1e-9 <= greeks["delta"] <= 1 + 1e-9
+        assert greeks["rho"] >= -1e-9
+    else:
+        assert -1 - 1e-9 <= greeks["delta"] <= 1e-9
+        assert greeks["rho"] <= 1e-9
+    assert greeks["gamma"] >= -1e-9
+    assert greeks["vega"] >= -1e-9
+    assert all(math.isfinite(value) for value in greeks.values())
+
+
+@pytest.mark.parametrize("kind", ["call", "put"])
+@pytest.mark.parametrize("K, sigma, T, r, q", [
+    (100.0, 0.25, 0.5, 0.04, 0.01),
+    (90.0, 0.20, 1.0, 0.05, 0.0),
+    (110.0, 0.35, 0.25, 0.03, 0.02),
+])
+def test_european_tree_greeks_match_black_scholes(kind, K, sigma, T, r, q):
+    # Con american=False el árbol debe dar casi las griegas de Black-Scholes:
+    # así comprobamos las fórmulas de nodos, unidades y desplazamientos.
+    tree = _crr_greeks(kind, 100.0, K, r, q, sigma, T, CRR_PRICE_STEPS, False)
+    exact = bs_greeks(kind, 100.0, K, r, q, sigma, T)
+    for name in GREEK_NAMES:
+        assert tree[name] == pytest.approx(exact[name], rel=1e-2, abs=1e-5), name
+
+
+def test_vega_is_one_sided_when_sigma_is_tiny():
+    # σ − 0,01 < MIN_VOL: no se puede bajar la volatilidad 1 punto,
+    # así que vega = P(σ + 0,01) − P(σ).
+    sigma = 0.005
+    assert sigma - 0.01 < MIN_VOL
+    args = ("call", 100.0, 100.0, 0.04, 0.01)
+    greeks = crr_greeks(*args, sigma, 0.5)
+    expected = crr_price(*args, sigma + 0.01, 0.5) - crr_price(*args, sigma, 0.5)
+    assert greeks["vega"] == pytest.approx(expected, abs=1e-12)
+    assert all(math.isfinite(value) for value in greeks.values())
+
+
+@pytest.mark.parametrize("kind", ["call", "put"])
+@pytest.mark.parametrize("r, q", [(0.30, 0.0), (-0.05, 0.20)])
+def test_crr_greeks_with_minimum_volatility_are_finite(kind, r, q):
+    greeks = crr_greeks(kind, 100.0, 100.0, r, q, MIN_VOL, 0.5)
+    assert all(math.isfinite(value) for value in greeks.values())
+
+
+@pytest.mark.parametrize("T, sigma", [(0.0, 0.25), (-0.1, 0.25), (0.5, 0.0), (0.5, -0.2)])
+def test_crr_greeks_undefined_raise_value_error(T, sigma):
+    with pytest.raises(ValueError):
+        crr_greeks("put", 100.0, 100.0, 0.04, 0.01, sigma, T)
+
+
+def test_crr_greeks_invalid_kind_raises():
+    with pytest.raises(ValueError):
+        crr_greeks("stock", 100.0, 100.0, 0.04, 0.01, 0.25, 0.5)
 
 
 # --- AC-B15 (parte): módulo puro ----------------------------------------------

@@ -17,7 +17,7 @@ import numpy as np
 
 from opciones.commissions import close_fee_expiry, close_fee_today, open_fee
 from opciones.models import CommissionSettings, Leg, Market
-from opciones.pricing import bs_greeks, bs_price, option_price
+from opciones.pricing import bs_price, option_greeks, option_price
 
 GREEK_NAMES = ("delta", "gamma", "theta", "vega", "rho")
 
@@ -88,6 +88,8 @@ def position_greeks(legs: list[Leg], market: Market) -> dict:
     """Griegas de la posición completa al precio spot actual.
 
     Griega de una pata = griega por acción × multiplicador × cantidad × lado.
+    Las griegas por acción salen del modelo activo (`option_greeks`):
+    árbol binomial para Acción/ETF por defecto, Black-Scholes si no.
     Una acción solo tiene delta (±cantidad); el resto de griegas es 0.
     Con días = 0 (o vol <= 0) las griegas no existen: devolvemos None
     en cada una y la interfaz muestra "—".
@@ -100,9 +102,8 @@ def position_greeks(legs: list[Leg], market: Market) -> dict:
         if leg.kind == "stock":
             totals["delta"] += leg.side * leg.quantity
             continue
-        greeks = bs_greeks(
-            leg.kind, market.spot, leg.strike, market.rate, market.q, market.vol, market.T
-        )
+        # Griegas por acción del modelo activo (árbol o Black-Scholes).
+        greeks = option_greeks(leg.kind, market, leg.strike)
         size = leg.side * leg.quantity * leg.multiplier
         for name in GREEK_NAMES:
             totals[name] += greeks[name] * size

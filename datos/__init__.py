@@ -21,6 +21,7 @@ from datos.errors import (
     NetworkError,
     RateLimitError,
 )
+from datos.fake import FakeProvider
 from datos.filters import (
     DEFAULT_RULES,
     EPS,
@@ -31,9 +32,26 @@ from datos.filters import (
     is_expiry_in_window,
 )
 from datos.provider import MarketDataProvider
+from datos.service import (
+    age_text,
+    cache_age_text,
+    live_age_text,
+    load_or_cache,
+    load_snapshot,
+    load_with_notices,
+    rate_from_percent,
+)
 from datos.types import MarketSnapshot, OptionQuote
 
 __all__ = [
+    "FakeProvider",
+    "age_text",
+    "cache_age_text",
+    "live_age_text",
+    "load_or_cache",
+    "load_snapshot",
+    "load_with_notices",
+    "rate_from_percent",
     "is_richer_or_equal",
     "read_snapshot",
     "richness",

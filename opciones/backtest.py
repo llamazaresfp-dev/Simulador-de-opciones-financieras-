@@ -15,8 +15,16 @@ enteros. `to_day_numbers` convierte una lista de fechas ISO.
 """
 
 import math
+from dataclasses import dataclass, field
 
 import numpy as np
+
+from opciones.catalog import Template, build_legs
+from opciones.metrics import ZERO_TOL
+from opciones.models import DAYS_PER_YEAR, PRICING_BLACK_SCHOLES, CommissionSettings, Market
+from opciones.payoff import pnl_expiry
+from opciones.simulation import SimulationSettings, exact_pop
+from opciones.validation import validate_legs, validate_market
 
 # Sesiones de mercado por año (para anualizar la volatilidad y el μ).
 TRADING_DAYS = 252
@@ -164,3 +172,179 @@ def first_analyzed_index(day_numbers, vol_window: int, years: float) -> tuple[in
             f"años (se pidieron {years}); se usa lo que hay."
         )
     return start, years_available, warning
+
+
+# --- Bucle del backtest (bloque 3) -------------------------------------------
+
+# Motivos por los que una fecha muestreada no entra en el estudio.
+SKIP_REASONS = ("no_window", "no_expiry", "invalid_market", "no_rate")
+
+MSG_NO_DATES = "No quedó ninguna fecha analizable con estos parámetros."
+MSG_RATE_FALLBACK = "Sin histórico de tasas (^IRX): se usa la tasa constante de la barra lateral."
+MSG_INDEX_NO_DIVIDENDS = "Índice: no se modelan sus dividendos (q = 0)."
+
+
+@dataclass
+class BacktestResult:
+    """Resultado del recorrido por el pasado.
+
+    Todos los arrays están alineados: la posición k es la fecha dates[k].
+    - dates: fechas (ISO) analizadas de verdad (las saltadas no están).
+    - pop: PoP neutral al riesgo que la app habría dado ese día.
+    - pop_mu: PoP con el μ histórico, o None si no se pidió.
+    - win: True si la estrategia ganó al vencimiento (P&L > ZERO_TOL).
+    - z: movimiento estandarizado del subyacente hasta el vencimiento.
+    - vol: volatilidad realizada usada ese día.
+    - skipped: cuántas fechas muestreadas se saltaron y por qué.
+    - warnings: avisos en español para la interfaz.
+    """
+
+    dates: np.ndarray
+    pop: np.ndarray
+    pop_mu: np.ndarray | None
+    win: np.ndarray
+    z: np.ndarray
+    vol: np.ndarray
+    skipped: dict = field(default_factory=dict)
+    warnings: list = field(default_factory=list)
+
+    @property
+    def n(self) -> int:
+        """Número de fechas analizadas."""
+        return len(self.pop)
+
+    @property
+    def years_analyzed(self) -> float:
+        """Años entre la primera y la última fecha analizada (0 si hay < 2)."""
+        if self.n < 2:
+            return 0.0
+        days = to_day_numbers([self.dates[0], self.dates[-1]])
+        return float((days[1] - days[0]) / DAYS_PER_YEAR_AVG)
+
+
+def _standardized_move(spot_start, spot_end, rate, q, vol, horizon_days) -> float:
+    """z = (ln(S_fin/S_ini) − (r − q − σ²/2)·T) / (σ·√T), con T = H/365.
+
+    Si el modelo lognormal fuera cierto, z sería una normal estándar.
+    """
+    T = horizon_days / DAYS_PER_YEAR
+    expected = (rate - q - vol**2 / 2) * T
+    return (math.log(spot_end / spot_start) - expected) / (vol * math.sqrt(T))
+
+
+def run_backtest(
+    dates,
+    close,
+    adj_close,
+    div_dates,
+    div_amounts,
+    rate_dates,
+    rate_values,
+    template: Template,
+    underlying: str,
+    horizon_days: int,
+    vol_window: int,
+    step: int,
+    settings: CommissionSettings,
+    fallback_rate: float,
+    first_date: str | None = None,
+    with_mu: bool = False,
+) -> BacktestResult:
+    """Recorre fechas pasadas y compara la PoP de cada día con el resultado real.
+
+    Para cada sesión muestreada i (cada 'step' sesiones desde 'first_date'):
+    1. sin ventana completa (i < max(W, 252)) → se salta ("no_window");
+    2. sin datos hasta t + H → se salta ("no_expiry");
+    3. con ^IRX pero sin dato ≤ t → se salta ("no_rate");
+    4. vol, q y r solo con datos ≤ t; mercado Black-Scholes con days = H;
+       si el mercado o las patas no son válidos → se salta ("invalid_market");
+    5. pop = exact_pop neutral; pop_mu con el μ histórico si se pide;
+       win = P&L al vencimiento con el cierre SIN ajustar de t + H > ZERO_TOL.
+
+    'rate_dates'/'rate_values' (fracciones) pueden ser None: entonces se
+    usa 'fallback_rate' en todas las fechas. 'settings' son las comisiones
+    ya resueltas (con o sin comisiones).
+    """
+    day_numbers = to_day_numbers(dates)
+    close = np.asarray(close, dtype=float)
+    adj_close = np.asarray(adj_close, dtype=float)
+    # Sin dividendos: arrays vacíos (q = 0 en todas las fechas).
+    if div_dates is None or len(div_dates) == 0:
+        div_days = np.array([], dtype=np.int64)
+        div_amounts = np.array([], dtype=float)
+    else:
+        div_days = to_day_numbers(div_dates)
+        div_amounts = np.asarray(div_amounts, dtype=float)
+    rate_days = None
+    if rate_dates is not None:
+        rate_days = to_day_numbers(rate_dates)
+        rate_values = np.asarray(rate_values, dtype=float)
+
+    warm = max(vol_window, MU_LOOKBACK)
+    begin = 0
+    if first_date is not None:
+        begin = int(np.searchsorted(day_numbers, to_day_numbers([first_date])[0], side="left"))
+
+    skipped = {reason: 0 for reason in SKIP_REASONS}
+    kept_dates, pops, pops_mu, wins, zs, vols = [], [], [], [], [], []
+    neutral = SimulationSettings(mu=None)
+
+    for i in range(begin, len(day_numbers), step):
+        if i < warm:
+            skipped["no_window"] += 1
+            continue
+        j = expiry_index(day_numbers, i, horizon_days)
+        if j is None:
+            skipped["no_expiry"] += 1
+            continue
+        if rate_days is None:
+            rate = fallback_rate
+        else:
+            rate = rate_at(rate_days, rate_values, day_numbers[i])
+            if rate is None:
+                skipped["no_rate"] += 1
+                continue
+
+        spot = float(close[i])
+        vol = realized_vol(adj_close, i, vol_window)
+        if vol is None:
+            skipped["invalid_market"] += 1
+            continue
+        q = trailing_dividend_yield(div_days, div_amounts, day_numbers[i], spot, underlying)
+        market = Market(underlying, spot, vol, horizon_days, rate, q, PRICING_BLACK_SCHOLES)
+        if validate_market(market):
+            skipped["invalid_market"] += 1
+            continue
+        legs = build_legs(template, market)
+        if validate_legs(legs):
+            skipped["invalid_market"] += 1
+            continue
+
+        pops.append(exact_pop(market, legs, settings, neutral))
+        if with_mu:
+            mu = trailing_mu(adj_close, i, vol)
+            pops_mu.append(exact_pop(market, legs, settings, SimulationSettings(mu=mu)))
+        pnl = pnl_expiry(legs, market, settings, np.array([close[j]]))[0]
+        wins.append(bool(pnl > ZERO_TOL))
+        zs.append(_standardized_move(spot, float(close[j]), rate, q, vol, horizon_days))
+        vols.append(vol)
+        kept_dates.append(str(np.datetime64(int(day_numbers[i]), "D")))
+
+    warnings = []
+    if not pops:
+        warnings.append(MSG_NO_DATES)
+    if rate_days is None:
+        warnings.append(MSG_RATE_FALLBACK)
+    if underlying == "Índice":
+        warnings.append(MSG_INDEX_NO_DIVIDENDS)
+
+    return BacktestResult(
+        dates=np.array(kept_dates, dtype=str),
+        pop=np.array(pops, dtype=float),
+        pop_mu=np.array(pops_mu, dtype=float) if with_mu else None,
+        win=np.array(wins, dtype=bool),
+        z=np.array(zs, dtype=float),
+        vol=np.array(vols, dtype=float),
+        skipped=skipped,
+        warnings=warnings,
+    )

@@ -87,7 +87,7 @@ Escenarios tomados de `process/context/tests/all-tests.md`: pytest sobre código
 - **AC-C2-2:** La fila del día actual (posiblemente parcial con el mercado abierto) se descarta; las demás filas válidas se conservan; filas con precio NaN, negativo o fechas duplicadas se descartan sin romper la carga.
   proven by: fila-de-hoy-descartada + filas-sucias-descartadas (tests con fixtures)
   strategy: Fully-Automated
-- **AC-C2-3:** El histórico se guarda en una caché local propia (carpeta ya ignorada por git, un archivo por ticker, versión de esquema propia, escritura atómica); se vuelve a descargar completo si la caché tiene más de 1 día de mercado; sin red se usa la caché mostrando su antigüedad; sin caché ni red, aviso y nada que calcular.
+- **AC-C2-3:** El histórico se guarda en una caché local propia (carpeta ya ignorada por git, un archivo por ticker, versión de esquema propia, escritura atómica); se vuelve a descargar completo si la caché tiene más de 1 día de mercado o no cubre los años pedidos + 1 de calentamiento (cambio del usuario 21-11-26; con menos años que los cacheados se reutiliza); sin red se usa la caché mostrando su antigüedad; sin caché ni red, aviso y nada que calcular.
   proven by: historial-caché-escribe-y-lee + historial-caché-caducada-redescarga + historial-sin-red-usa-caché + historial-sin-red-sin-caché + carpeta-ignorada-por-git (tests con reloj y proveedor falsos)
   strategy: Fully-Automated
 - **AC-C2-4:** Si el histórico disponible es más corto que los años pedidos, se muestra un aviso con los años reales disponibles y el backtest usa lo que hay.
@@ -166,7 +166,7 @@ Las decisiones del MVP, A, B1 y C1 siguen vigentes. Decisiones nuevas de C2 (der
 | 4 | Plantilla | Una a la vez de las 8 del catálogo; por defecto iron condor |
 | 5 | Comisiones | Incluidas con los valores actuales de Ajustes; interruptor para excluir |
 | 6 | Alcance | Calibración + colas; replay de estrategia fuera |
-| 7 | Almacenamiento | `.cache_datos/history/<TICKER>.json`, sin caducidad dura (se redescarga si tiene más de 1 día de mercado); antigüedad visible |
+| 7 | Almacenamiento | `.cache_datos/history/<TICKER>.json`, sin caducidad dura (se redescarga si tiene más de 1 día de mercado o no cubre los años pedidos + 1); antigüedad visible |
 | 8 | Tickers | Los mismos 11 de C1; aviso si el histórico es más corto; símbolo del índice (^SPX, con respaldo ^GSPC) decidido tras una prueba en vivo |
 | 9 | r y q históricos | r: ^IRX por fecha (respaldo: r constante de la barra lateral con aviso); q: dividendos 12 meses previos / precio en t; índice: q = 0 con nota |
 | 10 | Vencimiento | Último día de negociación en o antes de t+H |

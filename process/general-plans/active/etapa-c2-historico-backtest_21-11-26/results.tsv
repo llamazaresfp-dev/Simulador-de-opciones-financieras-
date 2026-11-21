@@ -2,3 +2,7 @@ iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_statu
 0	2026-11-21	4	0	4	0	ACTIVE	baseline	outer PVL first pass: Gate CONDITIONAL (C-V1 provider built on every rerun, C-V2 oracle tolerances too tight, C-V3 cache gate blind to ignored dir, C-V4 FakeProvider history knobs)
 1	2026-11-21	4	0	4	4	ACTIVE	CONTINUE	supplement applied C-V1..C-V4; re-run PVL from V1
 2	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation from V1: Gate PASS after 1 supplement cycle (advisories E-1..E-6 in contract)
+3	2026-11-21	1	0	1	1	ACTIVE	CONTINUE	user rejected deviation (i): years+1 download with coverage-checked cache reuse; re-run PVL from V1
+4	2026-11-21	2	0	2	0	ACTIVE	CONTINUE	re-validation after user change: Gate CONDITIONAL (S-1 bound W 10-250, S-2 requested_start Optional, S-3 advisory)
+5	2026-11-21	2	0	2	3	ACTIVE	CONTINUE	supplement applied S-1..S-3; re-run PVL from V1
+6	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation cycle 3: Gate PASS (E-8 cosmetic note only)

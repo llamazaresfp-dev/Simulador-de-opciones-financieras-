@@ -198,3 +198,54 @@ def test_protocol_methods_are_declared():
         "get_dividend_yield",
     ):
         assert hasattr(MarketDataProvider, name)
+
+
+# --- Bloqueo de red en los tests (Etapa C1, bloque 3a, AC-C1-14) ---
+# El bloqueo vive en tests/conftest.py (fixture autouse). Estos tests
+# comprueban que ningún test puede abrir conexiones de red por error.
+
+import asyncio  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+
+BLOCK_MESSAGE = "red bloqueada en tests: use LIVE_DATA=1"
+
+needs_block = pytest.mark.skipif(
+    os.environ.get("LIVE_DATA") == "1",
+    reason="con LIVE_DATA=1 la red está permitida a propósito",
+)
+
+
+@needs_block
+def test_network_is_blocked_for_create_connection():
+    # Dirección de documentación (TEST-NET-1): nunca debe salir nada.
+    with pytest.raises(RuntimeError, match=BLOCK_MESSAGE):
+        socket.create_connection(("192.0.2.1", 80), timeout=1)
+
+
+@needs_block
+def test_network_is_blocked_for_name_resolution():
+    with pytest.raises(RuntimeError, match=BLOCK_MESSAGE):
+        socket.getaddrinfo("example.com", 443)
+
+
+@needs_block
+def test_network_is_blocked_for_raw_socket_connect():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(RuntimeError, match=BLOCK_MESSAGE):
+            sock.connect(("192.0.2.1", 80))
+    finally:
+        sock.close()
+
+
+def test_socketpair_and_asyncio_still_work():
+    # socketpair lo usan asyncio y Streamlit: el bloqueo no debe tocarlo.
+    left, right = socket.socketpair()
+    try:
+        left.sendall(b"ok")
+        assert right.recv(2) == b"ok"
+    finally:
+        left.close()
+        right.close()
+    assert asyncio.run(asyncio.sleep(0, result=7)) == 7

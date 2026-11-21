@@ -1,0 +1,107 @@
+{
+ "_comment": "SINT\u00c9TICA: mercado casi muerto; la mayor\u00eda de filas con bid = 0 (y alguna con ask = 0). Solo 2 filas tienen comprador y vendedor.",
+ "source": "synthetic",
+ "spot": 100.0,
+ "rows": [
+  {
+   "kind": "call",
+   "strike": 90.0,
+   "bid": 0.0,
+   "ask": 10.6,
+   "last": 10.2,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "call",
+   "strike": 95.0,
+   "bid": 0.0,
+   "ask": 5.9,
+   "last": 5.5,
+   "oi": 800,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "call",
+   "strike": 100.0,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": 2.05,
+   "oi": 900,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "call",
+   "strike": 105.0,
+   "bid": 0.0,
+   "ask": 0.8,
+   "last": 0.6,
+   "oi": 700,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "call",
+   "strike": 110.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 0.1,
+   "oi": 300,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "put",
+   "strike": 90.0,
+   "bid": 0.0,
+   "ask": 0.4,
+   "last": 0.3,
+   "oi": 400,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "put",
+   "strike": 95.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 0.9,
+   "oi": 650,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "put",
+   "strike": 100.0,
+   "bid": 1.8,
+   "ask": 1.9,
+   "last": 1.85,
+   "oi": 1000,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "put",
+   "strike": 105.0,
+   "bid": 0.0,
+   "ask": 5.7,
+   "last": 5.1,
+   "oi": 350,
+   "volume": 0,
+   "iv_yahoo": null
+  },
+  {
+   "kind": "put",
+   "strike": 110.0,
+   "bid": 0.0,
+   "ask": 10.9,
+   "last": 10.4,
+   "oi": 120,
+   "volume": 0,
+   "iv_yahoo": null
+  }
+ ]
+}

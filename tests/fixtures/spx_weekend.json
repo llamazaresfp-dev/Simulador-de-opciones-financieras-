@@ -1,0 +1,128 @@
+{
+ "_comment": "Filas reales de ^SPX grabadas en fin de semana (mercado cerrado): TODOS los bid y ask son 0 y varios OI faltan (null). Ninguna fila debe sobrevivir a los filtros.",
+ "source": "real",
+ "ticker": "^SPX",
+ "spot": 6910.39,
+ "rows": [
+  {
+   "kind": "call",
+   "strike": 6800.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 330.0,
+   "oi": 0,
+   "volume": 7,
+   "iv_yahoo": 1.0000000000000003e-05
+  },
+  {
+   "kind": "call",
+   "strike": 6900.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 255.87,
+   "oi": 0,
+   "volume": 5,
+   "iv_yahoo": 1.0000000000000003e-05
+  },
+  {
+   "kind": "call",
+   "strike": 6940.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 254.6,
+   "oi": null,
+   "volume": 1,
+   "iv_yahoo": 0.0039162109375
+  },
+  {
+   "kind": "call",
+   "strike": 7000.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 195.87,
+   "oi": 0,
+   "volume": 1,
+   "iv_yahoo": 0.007822421875
+  },
+  {
+   "kind": "call",
+   "strike": 7200.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 92.75,
+   "oi": 8,
+   "volume": 6,
+   "iv_yahoo": 0.0312596875
+  },
+  {
+   "kind": "call",
+   "strike": 7500.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 21.01,
+   "oi": 117,
+   "volume": 104,
+   "iv_yahoo": 0.062509375
+  },
+  {
+   "kind": "put",
+   "strike": 6300.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 81.2,
+   "oi": 151,
+   "volume": 41,
+   "iv_yahoo": 0.062509375
+  },
+  {
+   "kind": "put",
+   "strike": 6600.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 79.6,
+   "oi": 69,
+   "volume": 27,
+   "iv_yahoo": 0.0312596875
+  },
+  {
+   "kind": "put",
+   "strike": 6900.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 214.53,
+   "oi": 47,
+   "volume": 26,
+   "iv_yahoo": 0.000986552734375
+  },
+  {
+   "kind": "put",
+   "strike": 6920.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 189.57,
+   "oi": null,
+   "volume": 3,
+   "iv_yahoo": 1.0000000000000003e-05
+  },
+  {
+   "kind": "put",
+   "strike": 7200.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 359.36,
+   "oi": 116,
+   "volume": 15,
+   "iv_yahoo": 1.0000000000000003e-05
+  },
+  {
+   "kind": "put",
+   "strike": 7500.0,
+   "bid": 0.0,
+   "ask": 0.0,
+   "last": 483.95,
+   "oi": 49,
+   "volume": 14,
+   "iv_yahoo": 1.0000000000000003e-05
+  }
+ ]
+}

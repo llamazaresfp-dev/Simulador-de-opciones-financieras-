@@ -1,0 +1,128 @@
+{
+ "_comment": "Filas reales recortadas de Yahoo (grabadas el s\u00e1bado 2026-11-21, cotizaciones del cierre del viernes; un vencimiento ~4 semanas). Sin fechas: solo cuentan los precios.",
+ "source": "real",
+ "ticker": "AAPL",
+ "spot": 342.56,
+ "rows": [
+  {
+   "kind": "call",
+   "strike": 330.0,
+   "bid": 19.95,
+   "ask": 21.9,
+   "last": 20.4,
+   "oi": 21202,
+   "volume": 494,
+   "iv_yahoo": 0.3979552392578125
+  },
+  {
+   "kind": "call",
+   "strike": 340.0,
+   "bid": 13.45,
+   "ask": 14.7,
+   "last": 13.7,
+   "oi": 15410,
+   "volume": 656,
+   "iv_yahoo": 0.35492588439941397
+  },
+  {
+   "kind": "call",
+   "strike": 345.0,
+   "bid": 10.9,
+   "ask": 11.8,
+   "last": 10.31,
+   "oi": 8671,
+   "volume": 3404,
+   "iv_yahoo": 0.3418950088500976
+  },
+  {
+   "kind": "call",
+   "strike": 350.0,
+   "bid": 7.9,
+   "ask": 8.9,
+   "last": 8.6,
+   "oi": 28856,
+   "volume": 5789,
+   "iv_yahoo": 0.3205634350585937
+  },
+  {
+   "kind": "call",
+   "strike": 360.0,
+   "bid": 4.25,
+   "ask": 4.65,
+   "last": 4.2,
+   "oi": 34359,
+   "volume": 5938,
+   "iv_yahoo": 0.2910227148437499
+  },
+  {
+   "kind": "call",
+   "strike": 370.0,
+   "bid": 1.58,
+   "ask": 2.0,
+   "last": 1.75,
+   "oi": 21326,
+   "volume": 5496,
+   "iv_yahoo": 0.2659985510253906
+  },
+  {
+   "kind": "put",
+   "strike": 320.0,
+   "bid": 4.55,
+   "ask": 4.9,
+   "last": 5.15,
+   "oi": 38265,
+   "volume": 9297,
+   "iv_yahoo": 0.3618227880859375
+  },
+  {
+   "kind": "put",
+   "strike": 325.0,
+   "bid": 5.35,
+   "ask": 6.3,
+   "last": 6.0,
+   "oi": 8545,
+   "volume": 10512,
+   "iv_yahoo": 0.3601138208007812
+  },
+  {
+   "kind": "put",
+   "strike": 340.0,
+   "bid": 9.55,
+   "ask": 10.55,
+   "last": 10.65,
+   "oi": 18040,
+   "volume": 15601,
+   "iv_yahoo": 0.3126899786376953
+  },
+  {
+   "kind": "put",
+   "strike": 345.0,
+   "bid": 11.45,
+   "ask": 12.6,
+   "last": 12.05,
+   "oi": 12435,
+   "volume": 7231,
+   "iv_yahoo": 0.2985909985351562
+  },
+  {
+   "kind": "put",
+   "strike": 355.0,
+   "bid": 15.95,
+   "ask": 17.85,
+   "last": 17.08,
+   "oi": 4702,
+   "volume": 1496,
+   "iv_yahoo": 0.27197993652343744
+  },
+  {
+   "kind": "put",
+   "strike": 375.0,
+   "bid": 31.0,
+   "ask": 33.65,
+   "last": 31.75,
+   "oi": 160,
+   "volume": 3,
+   "iv_yahoo": 0.2557447473144532
+  }
+ ]
+}

@@ -375,3 +375,208 @@ def test_package_reexports_filters():
     ):
         assert getattr(datos, name) is getattr(filters, name)
         assert name in datos.__all__
+
+
+# --- Fixtures grabadas y sintéticas (Etapa C1, bloque 3b) ---
+# Las filas viven en tests/fixtures/*.json. Las reales (aapl, spy,
+# spx_weekend) se grabaron de Yahoo el sábado 2026-11-21 y se recortaron;
+# las demás son sintéticas (campo "source": "synthetic").
+#
+# Cifras MEDIDAS con DEFAULT_RULES sobre estas fixtures exactas
+# (filas crudas -> filas limpias -> filas que sobreviven):
+#   aapl         12 -> 12 -> 8  (4 calls + 4 puts; 4 caen por spread)
+#   spy          13 -> 13 -> 9  (2 caen por OI 13/91, 2 por spread)
+#   spx_weekend  12 -> 10 -> 0  (mercado cerrado: todo bid = 0; 2 OI null)
+#   spx          15 -> 15 -> 11 (sintética; 2 por OI < 100, 2 por spread)
+#   bid_zero     10 -> 10 -> 2
+#   dirty        14 -> 4  -> 3  (10 filas rotas; 1 duplicada)
+#   stale_last    2 -> 2  -> 2
+#   edge_exact   11 -> 11 -> 6  (cada fila trae su "expect")
+# Sobre la grabación completa (sábado) las cifras fueron AAPL 15/28,
+# SPY 124/148, ^SPX 0/197: el fin de semana ensancha los spreads.
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# (nombre, filas crudas, filas limpias, filas que sobreviven)
+MEASURED_SURVIVAL = [
+    ("aapl", 12, 12, 8),
+    ("spy", 13, 13, 9),
+    ("spx_weekend", 12, 10, 0),
+    ("spx", 15, 15, 11),
+    ("bid_zero", 10, 10, 2),
+    ("dirty", 14, 4, 3),
+    ("stale_last", 2, 2, 2),
+    ("edge_exact", 11, 11, 6),
+]
+
+REQUIRED_RAW_KEYS = {"kind", "strike", "bid", "ask", "oi"}
+
+
+def load_fixture(name):
+    """Lee tests/fixtures/<name>.json (admite los literales NaN/Infinity)."""
+    with open(FIXTURES_DIR / f"{name}.json", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def run_filters(fixture, rules=DEFAULT_RULES):
+    """Limpia y filtra las filas de una fixture: (limpias, supervivientes)."""
+    cleaned = [q for q in (clean_row(r) for r in fixture["rows"]) if q is not None]
+    return cleaned, filter_chain(cleaned, fixture["spot"], rules)
+
+
+def has_nan(quote):
+    """True si algún campo numérico de la cotización es NaN o infinito."""
+    values = [getattr(quote, f.name) for f in dataclasses.fields(quote)]
+    return any(
+        isinstance(v, float) and not math.isfinite(v) for v in values if v is not None
+    )
+
+
+@pytest.mark.parametrize("name, n_raw, n_clean, n_alive", MEASURED_SURVIVAL)
+def test_fixture_survival_counts(name, n_raw, n_clean, n_alive):
+    fixture = load_fixture(name)
+    cleaned, alive = run_filters(fixture)
+    assert len(fixture["rows"]) == n_raw
+    assert len(cleaned) == n_clean
+    assert len(alive) == n_alive
+    assert not any(has_nan(q) for q in alive)
+
+
+@pytest.mark.parametrize("name", [m[0] for m in MEASURED_SURVIVAL])
+def test_fixture_is_well_formed(name):
+    fixture = load_fixture(name)
+    assert fixture["source"] in ("real", "synthetic")
+    assert fixture["spot"] > 0
+    assert fixture["rows"]
+
+
+@pytest.mark.parametrize("name", ["aapl", "spy", "spx_weekend", "spx"])
+def test_chain_fixtures_keep_the_raw_row_keys(name):
+    for row in load_fixture(name)["rows"]:
+        assert REQUIRED_RAW_KEYS <= set(row)
+
+
+def test_real_fixtures_are_marked_real_and_spx_liquid_is_synthetic():
+    for name in ("aapl", "spy", "spx_weekend"):
+        assert load_fixture(name)["source"] == "real"
+    assert load_fixture("spx")["source"] == "synthetic"
+
+
+def test_aapl_survivors_are_the_measured_strikes():
+    _, alive = run_filters(load_fixture("aapl"))
+    assert [(q.kind, q.strike) for q in alive] == [
+        ("call", 330.0),
+        ("call", 340.0),
+        ("call", 345.0),
+        ("call", 360.0),
+        ("put", 320.0),
+        ("put", 340.0),
+        ("put", 345.0),
+        ("put", 375.0),
+    ]
+
+
+def test_spy_drops_low_open_interest_and_wide_spreads():
+    _, alive = run_filters(load_fixture("spy"))
+    strikes = {(q.kind, q.strike) for q in alive}
+    assert ("call", 702.0) not in strikes  # OI 13
+    assert ("call", 714.0) not in strikes  # OI 91
+    assert ("put", 706.0) not in strikes  # spread 3,49 / mid 28,7 = 12 %
+    assert ("put", 715.0) not in strikes  # spread 3,72 / mid 33,4 = 11 %
+    # Yahoo rellena con 1e-05 la IV que no sabe calcular: la fila sigue
+    # siendo líquida (la IV de Yahoo es solo referencia, no filtra).
+    put_755 = next(q for q in alive if (q.kind, q.strike) == ("put", 755.0))
+    assert put_755.iv_yahoo == pytest.approx(1e-05)
+
+
+def test_spx_weekend_all_bids_zero_nothing_survives():
+    fixture = load_fixture("spx_weekend")
+    assert all(row["bid"] == 0 for row in fixture["rows"])
+    cleaned, alive = run_filters(fixture)
+    assert cleaned  # las filas no están rotas: son ilíquidas
+    assert alive == []
+
+
+def test_spx_synthetic_filters_low_oi_and_wide_spreads():
+    _, alive = run_filters(load_fixture("spx"))
+    strikes = {(q.kind, q.strike) for q in alive}
+    for dropped in [("call", 7100.0), ("put", 7100.0), ("call", 7200.0), ("put", 6800.0)]:
+        assert dropped not in strikes
+    assert sum(q.kind == "call" for q in alive) == 6
+    assert sum(q.kind == "put" for q in alive) == 5
+
+
+def test_bid_zero_fixture_offers_none_of_the_zero_bid_rows():
+    _, alive = run_filters(load_fixture("bid_zero"))
+    assert all(q.bid > 0 and q.ask > 0 for q in alive)
+    assert [(q.kind, q.strike) for q in alive] == [("call", 100.0), ("put", 100.0)]
+
+
+def test_dirty_fixture_drops_broken_rows_and_keeps_the_rest():
+    cleaned, alive = run_filters(load_fixture("dirty"))
+    assert [(q.kind, q.strike) for q in cleaned] == [
+        ("call", 95.0),
+        ("call", 95.0),
+        ("put", 100.0),
+        ("put", 104.0),
+    ]
+    assert [(q.kind, q.strike) for q in alive] == [
+        ("call", 95.0),
+        ("put", 100.0),
+        ("put", 104.0),
+    ]
+    # Del duplicado se conserva la primera fila (bid 5,60).
+    assert alive[0].bid == pytest.approx(5.60)
+    # Opcionales NaN -> valores seguros.
+    put_100 = alive[1]
+    assert put_100.last is None and put_100.iv_yahoo is None and put_100.volume == 0
+    assert not any(has_nan(q) for q in cleaned)
+
+
+def test_stale_last_premium_comes_from_mid_not_last():
+    _, alive = run_filters(load_fixture("stale_last"))
+    put = next(q for q in alive if q.kind == "put")
+    assert put.last == pytest.approx(176.0)
+    assert put.mid == pytest.approx(328.5)  # (322 + 335) / 2
+    assert abs(put.mid - put.last) > 100
+
+
+def edge_rows():
+    """Filas de edge_exact como parámetros (id = caso legible)."""
+    return [pytest.param(row, id=row["case"]) for row in load_fixture("edge_exact")["rows"]]
+
+
+@pytest.mark.parametrize("row", edge_rows())
+def test_edge_exact_rows(row):
+    quote = clean_row(row)
+    assert quote is not None
+    assert survives(quote, spot=load_fixture("edge_exact")["spot"]) is row["expect"]
+
+
+@pytest.mark.parametrize(
+    "case", load_fixture("edge_exact")["expiry_days"], ids=lambda c: f"{c['days']}d"
+)
+def test_edge_exact_expiry_days(case):
+    assert is_expiry_in_window(case["days"]) is case["expect"]
+
+
+def test_edge_exact_needs_the_tolerance():
+    # Sin EPS, la fila 0,30/0,40 (y la de 10 % exacto) se perdería.
+    no_eps = LiquidityRules(eps=0.0)
+    _, with_eps = run_filters(load_fixture("edge_exact"))
+    _, without = run_filters(load_fixture("edge_exact"), no_eps)
+    assert ("put", 103.0) in {(q.kind, q.strike) for q in with_eps}
+    assert ("put", 103.0) not in {(q.kind, q.strike) for q in without}
+
+
+def test_fixtures_have_no_absolute_dates():
+    # El reloj se fija en los tests (bloque 3d): las fixtures no llevan fechas.
+    for path in FIXTURES_DIR.glob("*.json"):
+        fixture = json.loads(path.read_text(encoding="utf-8"))
+        assert "expiry" not in fixture
+        for row in fixture["rows"]:
+            assert "last_trade" not in row and "expiry" not in row
+            assert not any(isinstance(v, str) and v[:4].isdigit() for v in row.values())

@@ -1,0 +1,27 @@
+{
+ "_comment": "SINT\u00c9TICA: el \u00faltimo precio negociado es viejo y est\u00e1 muy lejos del mid (put con last 176 frente a bid/ask 322/335). La prima debe salir del mid, nunca de last.",
+ "source": "synthetic",
+ "spot": 6680.0,
+ "rows": [
+  {
+   "kind": "put",
+   "strike": 7000.0,
+   "bid": 322.0,
+   "ask": 335.0,
+   "last": 176.0,
+   "oi": 450,
+   "volume": 3,
+   "iv_yahoo": 0.19
+  },
+  {
+   "kind": "call",
+   "strike": 6700.0,
+   "bid": 150.0,
+   "ask": 156.0,
+   "last": 98.0,
+   "oi": 800,
+   "volume": 2,
+   "iv_yahoo": 0.17
+  }
+ ]
+}

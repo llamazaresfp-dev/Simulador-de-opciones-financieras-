@@ -1,0 +1,157 @@
+{
+ "_comment": "SINT\u00c9TICA: filas en el borde EXACTO de cada regla (C-V3), con entradas binario-exactas o redondeadas. 'expect' dice si debe sobrevivir con DEFAULT_RULES. Los bordes de vencimiento van como d\u00edas relativos al reloj fijado (expiry_days), sin fechas.",
+ "source": "synthetic",
+ "spot": 100.0,
+ "rows": [
+  {
+   "kind": "call",
+   "strike": 80.0,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "strike -20 % exacto"
+  },
+  {
+   "kind": "call",
+   "strike": 120.0,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "strike +20 % exacto"
+  },
+  {
+   "kind": "call",
+   "strike": 79.99,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": false,
+   "case": "strike justo fuera (-)"
+  },
+  {
+   "kind": "call",
+   "strike": 120.01,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": false,
+   "case": "strike justo fuera (+)"
+  },
+  {
+   "kind": "put",
+   "strike": 100.0,
+   "bid": 9.5,
+   "ask": 10.5,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "spread relativo 10 % exacto"
+  },
+  {
+   "kind": "put",
+   "strike": 101.0,
+   "bid": 9.4995,
+   "ask": 10.5005,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": false,
+   "case": "spread relativo 10,01 %"
+  },
+  {
+   "kind": "put",
+   "strike": 102.0,
+   "bid": 0.5,
+   "ask": 0.6,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "spread absoluto 0,10 (0,50/0,60)"
+  },
+  {
+   "kind": "put",
+   "strike": 103.0,
+   "bid": 0.3,
+   "ask": 0.4,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "spread absoluto 0,10 (0,30/0,40), necesita EPS"
+  },
+  {
+   "kind": "put",
+   "strike": 104.0,
+   "bid": 0.3,
+   "ask": 0.41,
+   "last": null,
+   "oi": 500,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": false,
+   "case": "spread absoluto 0,11"
+  },
+  {
+   "kind": "call",
+   "strike": 101.0,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 100,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": true,
+   "case": "OI 100 exacto"
+  },
+  {
+   "kind": "call",
+   "strike": 102.0,
+   "bid": 2.0,
+   "ask": 2.1,
+   "last": null,
+   "oi": 99,
+   "volume": 0,
+   "iv_yahoo": null,
+   "expect": false,
+   "case": "OI 99"
+  }
+ ],
+ "expiry_days": [
+  {
+   "days": 6,
+   "expect": false
+  },
+  {
+   "days": 7,
+   "expect": true
+  },
+  {
+   "days": 120,
+   "expect": true
+  },
+  {
+   "days": 121,
+   "expect": false
+  }
+ ]
+}

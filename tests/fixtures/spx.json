@@ -1,0 +1,158 @@
+{
+ "_comment": "SINT\u00c9TICA (no son datos reales): cadena l\u00edquida de SPX con n\u00fameros realistas, porque la grabaci\u00f3n real fue en fin de semana (todo bid = 0). Dos filas con OI < 100 y dos con spread ancho para que el filtro descarte algunas.",
+ "source": "synthetic",
+ "ticker": "^SPX",
+ "spot": 6900.0,
+ "rows": [
+  {
+   "kind": "call",
+   "strike": 6300.0,
+   "bid": 640.1,
+   "ask": 646.3,
+   "last": 641.0,
+   "oi": 850,
+   "volume": 12,
+   "iv_yahoo": 0.24
+  },
+  {
+   "kind": "call",
+   "strike": 6600.0,
+   "bid": 368.4,
+   "ask": 373.0,
+   "last": 370.2,
+   "oi": 1200,
+   "volume": 40,
+   "iv_yahoo": 0.205
+  },
+  {
+   "kind": "call",
+   "strike": 6800.0,
+   "bid": 205.3,
+   "ask": 207.9,
+   "last": 206.0,
+   "oi": 2400,
+   "volume": 310,
+   "iv_yahoo": 0.178
+  },
+  {
+   "kind": "call",
+   "strike": 6900.0,
+   "bid": 136.2,
+   "ask": 138.1,
+   "last": 137.4,
+   "oi": 5100,
+   "volume": 1250,
+   "iv_yahoo": 0.165
+  },
+  {
+   "kind": "call",
+   "strike": 7000.0,
+   "bid": 82.4,
+   "ask": 83.8,
+   "last": 83.0,
+   "oi": 4300,
+   "volume": 980,
+   "iv_yahoo": 0.152
+  },
+  {
+   "kind": "call",
+   "strike": 7100.0,
+   "bid": 44.1,
+   "ask": 45.2,
+   "last": 44.6,
+   "oi": 60,
+   "volume": 15,
+   "iv_yahoo": 0.143
+  },
+  {
+   "kind": "call",
+   "strike": 7200.0,
+   "bid": 20.4,
+   "ask": 24.9,
+   "last": 22.0,
+   "oi": 1900,
+   "volume": 210,
+   "iv_yahoo": 0.137
+  },
+  {
+   "kind": "call",
+   "strike": 7500.0,
+   "bid": 1.95,
+   "ask": 2.1,
+   "last": 2.0,
+   "oi": 3200,
+   "volume": 400,
+   "iv_yahoo": 0.128
+  },
+  {
+   "kind": "put",
+   "strike": 6300.0,
+   "bid": 22.6,
+   "ask": 23.4,
+   "last": 23.0,
+   "oi": 6100,
+   "volume": 700,
+   "iv_yahoo": 0.262
+  },
+  {
+   "kind": "put",
+   "strike": 6500.0,
+   "bid": 41.8,
+   "ask": 43.0,
+   "last": 42.5,
+   "oi": 3900,
+   "volume": 520,
+   "iv_yahoo": 0.231
+  },
+  {
+   "kind": "put",
+   "strike": 6700.0,
+   "bid": 78.2,
+   "ask": 79.6,
+   "last": 79.0,
+   "oi": 2700,
+   "volume": 610,
+   "iv_yahoo": 0.199
+  },
+  {
+   "kind": "put",
+   "strike": 6800.0,
+   "bid": 103.5,
+   "ask": 120.0,
+   "last": 110.0,
+   "oi": 1500,
+   "volume": 90,
+   "iv_yahoo": 0.185
+  },
+  {
+   "kind": "put",
+   "strike": 6900.0,
+   "bid": 136.8,
+   "ask": 138.7,
+   "last": 137.5,
+   "oi": 4800,
+   "volume": 1400,
+   "iv_yahoo": 0.168
+  },
+  {
+   "kind": "put",
+   "strike": 7100.0,
+   "bid": 238.1,
+   "ask": 241.9,
+   "last": 240.0,
+   "oi": 75,
+   "volume": 8,
+   "iv_yahoo": 0.15
+  },
+  {
+   "kind": "put",
+   "strike": 7500.0,
+   "bid": 600.2,
+   "ask": 607.4,
+   "last": 603.0,
+   "oi": 300,
+   "volume": 5,
+   "iv_yahoo": 0.132
+  }
+ ]
+}

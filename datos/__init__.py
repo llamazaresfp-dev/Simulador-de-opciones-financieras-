@@ -22,6 +22,20 @@ from datos.errors import (
     RateLimitError,
 )
 from datos.fake import FakeProvider
+from datos.history_cache import (
+    covers,
+    history_path,
+    is_fresh,
+    read_history,
+    start_for_years,
+    write_history,
+)
+from datos.history_service import (
+    HistoryLoad,
+    clean_history,
+    history_age_text,
+    load_history,
+)
 from datos.filters import (
     DEFAULT_RULES,
     EPS,
@@ -100,4 +114,14 @@ __all__ = [
     "PriceHistory",
     "RATE_HISTORY_SYMBOL",
     "history_symbols",
+    "covers",
+    "history_path",
+    "is_fresh",
+    "read_history",
+    "start_for_years",
+    "write_history",
+    "HistoryLoad",
+    "clean_history",
+    "history_age_text",
+    "load_history",
 ]

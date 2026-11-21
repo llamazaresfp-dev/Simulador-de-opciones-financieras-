@@ -8,3 +8,6 @@ __pycache__/
 # Instrucciones de los agentes (Claude y Codex): se consultan en local, no se versionan
 CLAUDE.md
 AGENTS.md
+
+# Caché local de datos de mercado (Etapa C1)
+.cache_datos/

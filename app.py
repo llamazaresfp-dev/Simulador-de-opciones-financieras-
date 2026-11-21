@@ -659,10 +659,14 @@ def render_expiry_select(snapshot) -> None:
     # Se ajusta ANTES de crear el widget (permitido por Streamlit).
     if st.session_state.get("expiry_choice") not in expiries:
         st.session_state["expiry_choice"] = expiries[0]
+    # Las etiquetas se calculan AQUÍ, dentro de la ejecución del script:
+    # Streamlit (y AppTest) pueden volver a llamar a format_func fuera de
+    # ella, donde st.session_state (el reloj de las pruebas) no está.
+    labels = {expiry: f"{expiry} ({days_until(expiry)} días)" for expiry in expiries}
     st.selectbox(
         "Vencimiento",
         expiries,
-        format_func=lambda expiry: f"{expiry} ({days_until(expiry)} días)",
+        format_func=lambda expiry: labels.get(expiry, str(expiry)),
         key="expiry_choice",
         on_change=on_expiry_change,
     )

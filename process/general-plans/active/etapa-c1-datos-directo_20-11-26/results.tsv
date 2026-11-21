@@ -5,3 +5,5 @@ iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_statu
 3	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation from V1: Gate PASS after 2 supplement cycles
 4	2026-11-21	1	1	0	1	ACTIVE	CONTINUE	EVL block 3c cycle 1: raw-count richness blocks complete fresh load after expiry rollover (AC-C1-10)
 5	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL block 3c re-run after fix: 239 targeted, 2569 full, complete/partial rule confirmed
+6	2026-11-21	1	1	0	1	ACTIVE	CONTINUE	EVL block 7 cycle 2: format_func reads real clock outside script run (date rot after NY midnight), 23 failures
+7	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL block 7 re-run after fix: 2742 passed 3 skipped (also unshare -rn); cache isolation and date independence confirmed

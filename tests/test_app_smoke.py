@@ -778,6 +778,23 @@ def test_other_clock_gives_same_relative_result(tmp_path):
     assert f"datos con ~15 min de retraso; cargados a las {hour}" in captions(at)
 
 
+def test_expiry_labels_do_not_read_clock_outside_script_run(tmp_path):
+    """Regresión: AppTest (y Streamlit) vuelven a llamar a format_func FUERA
+    de la ejecución del script, donde st.session_state (el reloj fijo) no
+    está. Las etiquetas deben salir del reloj fijo y no del real. El reloj
+    está en el pasado (2020), así que la fecha real nunca coincide con él."""
+    past = datetime(2020, 6, 10, 10, 30, tzinfo=ZoneInfo("America/New_York"))
+    at = load(choose_ticker(data_app(tmp_path, FakeProvider(today=past), past), "ETF", "SPY"))
+    assert not at.exception
+    select = at.selectbox(key="expiry_choice")
+    expiries = sorted(at.session_state["snapshot"].chains)
+    # Llamada directa fuera de la ejecución del script, como hace AppTest.
+    assert select.format_func(expiries[0]) == f"{expiries[0]} (10 días)"
+    select.set_value(expiries[1]).run()
+    assert not at.exception
+    assert at.session_state["expiry_choice"] == expiries[1]
+
+
 def test_missing_dividend_yield_sets_q_zero_with_caption(tmp_path):
     provider = FakeProvider(today=FIXED_NOW, dividend_yield=None)
     at = data_app(tmp_path, provider)
@@ -973,3 +990,121 @@ def test_expiry_mismatch_shows_warning_and_keeps_leg(tmp_path):
         for w in warnings
     )
     assert at.session_state["legs"][-1]["id"] == leg["id"]
+
+
+# ---------------------------------------------------------------------------
+# Etapa C1, bloque 7: flujo completo de principio a fin (AC-C1-2, AC-C1-16).
+# FakeProvider + reloj fijo + caché en tmp_path: nunca red ni .cache_datos real.
+# ---------------------------------------------------------------------------
+
+import math  # noqa: E402
+
+NAN_RE = re.compile(r"\bnan\b|\binf\b", re.IGNORECASE)
+
+
+def shown_texts(at: AppTest) -> list[str]:
+    """Todos los textos de resultados: métricas, markdown, captions y tablas."""
+    texts = [metric.value for metric in at.metric]
+    texts += [md.value for md in at.markdown]
+    texts += captions(at)
+    for table in at.table:
+        texts += [str(value) for value in table.value.to_numpy().ravel()]
+    return texts
+
+
+def assert_analysis_ok(at: AppTest) -> None:
+    """La app dibujó el análisis completo, sin excepción, error ni NaN."""
+    assert not at.exception
+    assert not at.error
+    assert "Beneficio máximo" in [metric.label for metric in at.metric]
+    assert len(at.get("plotly_chart")) == 2
+    assert scenarios_expander(at) is not None
+    bad = [text for text in shown_texts(at) if NAN_RE.search(str(text))]
+    assert bad == []
+    for leg in at.session_state["legs"]:
+        assert math.isfinite(leg["price"]) and math.isfinite(leg["strike"])
+
+
+def near_spot_strike(at: AppTest) -> float:
+    """Strike líquido ofrecido más cercano al spot cargado."""
+    spot = at.session_state["snapshot"].spot
+    return min(at.selectbox(key="pick_strike").options, key=lambda s: abs(float(s.split()[0]) - spot))
+
+
+def test_e2e_load_choose_expiry_add_real_leg_and_analyze(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    assert_analysis_ok(at)
+    # Elegir otro vencimiento ofrecido (45 días) antes de añadir la pata.
+    target = (FIXED_NOW.date() + timedelta(days=45)).isoformat()
+    expiry_selects(at)[0].set_value(target).run()
+    assert at.session_state["days"] == 45
+    at.selectbox(key="pick_kind").set_value("put").run()
+    strike = float(near_spot_strike(at).split()[0])
+    leg = add_real_leg(at, "put", strike)
+    assert leg["premium_source"] == "mercado" and leg["expiry"] == target
+    assert leg["price"] == pytest.approx((leg["bid"] + leg["ask"]) / 2)
+    assert_analysis_ok(at)
+    assert not any("vencimiento elegido" in w.value for w in at.warning)
+    # La pata inicial y la pata real conviven en el análisis.
+    assert len(at.session_state["legs"]) == 2
+
+
+def test_e2e_switch_spy_to_qqq_shows_no_spy_chain(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    add_real_leg(at)
+    at.selectbox(key="ticker_choice").set_value("QQQ").run()
+    assert not at.exception
+    assert at.session_state["snapshot"] is None
+    assert not picker_shown(at)
+    assert expiry_selects(at) == []
+    # Nada de la cadena de SPY sigue a la vista.
+    assert not any("cargados a las" in text or "Solo opciones líquidas" in text for text in captions(at))
+    # La pata ya añadida se conserva y el análisis sigue funcionando.
+    assert_analysis_ok(at)
+
+
+def test_e2e_network_error_with_cache_still_analyzes(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    at.session_state["data_provider"] = FakeProvider(today=FIXED_NOW, fail_with=NetworkError)
+    at = load(at)
+    assert at.session_state["snapshot"].source == "cache"
+    assert MSG_NETWORK in [warning.value for warning in at.warning]
+    leg = add_real_leg(at)
+    assert leg["premium_source"] == "mercado"
+    assert_analysis_ok(at)
+
+
+def test_e2e_network_error_without_cache_keeps_manual_analysis(tmp_path):
+    at = data_app(tmp_path, FakeProvider(today=FIXED_NOW, fail_with=NetworkError))
+    at = load(choose_ticker(at, "ETF", "SPY"))
+    assert not at.exception
+    errors = [error.value for error in at.error]
+    assert MSG_NETWORK in errors and MSG_NO_CACHE in errors
+    assert not picker_shown(at)
+    # El análisis con los datos manuales sigue dibujándose.
+    assert "Beneficio máximo" in [metric.label for metric in at.metric]
+    assert [text for text in shown_texts(at) if NAN_RE.search(str(text))] == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_e2e_index_with_c10_note_and_real_leg(tmp_path):
+    at = choose_ticker(data_app(tmp_path), "Índice", "SPX")
+    at.number_input(key="q_pct").set_value(1.2).run()
+    at = load(at)
+    assert at.session_state["q_pct"] == 1.2
+    assert MSG_Q_INDEX in captions(at)
+    strike = float(near_spot_strike(at).split()[0])
+    leg = add_real_leg(at, "call", strike)
+    assert leg["premium_source"] == "mercado"
+    assert_analysis_ok(at)
+
+
+def test_e2e_manual_mode_identical_with_data_layer_injected(app, tmp_path):
+    # Con proveedor, caché y reloj inyectados pero sin cargar nada, la app
+    # muestra exactamente lo mismo que la app recién abierta (AC-C1-2).
+    data = data_app(tmp_path)
+    assert not data.exception
+    assert [(m.label, m.value) for m in data.metric] == [(m.label, m.value) for m in app.metric]
+    assert [md.value for md in data.markdown] == [md.value for md in app.markdown]
+    assert data.session_state["legs"] == app.session_state["legs"]
+    assert list(tmp_path.iterdir()) == []

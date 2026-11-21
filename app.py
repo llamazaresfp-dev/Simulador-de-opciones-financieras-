@@ -18,8 +18,15 @@ Todo el cálculo lo hace el motor (`opciones`).
 Arranque: .venv/bin/streamlit run app.py
 """
 
+from datetime import date, datetime
+
 import plotly.graph_objects as go
 import streamlit as st
+
+from datos.cache import MARKET_TZ, market_today
+from datos.errors import MSG_EMPTY
+from datos.service import MSG_Q_INDEX, MSG_Q_MISSING, age_text, load_or_cache
+from datos.tickers import MANUAL_ENTRY, resolve_ticker, ticker_options
 
 from opciones import (
     TEMPLATES,
@@ -115,6 +122,20 @@ def init_state() -> None:
     st.session_state.setdefault("pricing_model", PRICING_BINOMIAL)
 
     st.session_state.setdefault("main_tab", "Catálogo")
+
+    # Datos de mercado en directo (Etapa C1). Con "Entrada manual" nada de
+    # esto se usa y la app funciona exactamente como antes.
+    # - ticker_choice / expiry_choice: claves de los selectbox de la barra
+    #   lateral (Ticker y Vencimiento).
+    # - snapshot: los datos cargados (MarketSnapshot) o None.
+    # - load_notice: avisos de la última carga (textos en español).
+    # Solo para pruebas: "data_provider", "cache_dir" y "clock" se pueden
+    # poner en session_state antes de arrancar; si no están, se usan Yahoo,
+    # la carpeta .cache_datos/ y la hora real de Nueva York.
+    st.session_state.setdefault("ticker_choice", MANUAL_ENTRY)
+    st.session_state.setdefault("expiry_choice", None)
+    st.session_state.setdefault("snapshot", None)
+    st.session_state.setdefault("load_notice", [])
 
     # Patas: lista de diccionarios. Cada pata tiene un `id` que nunca se
     # repite (sirve para nombrar sus widgets) y `premium_manual`, que dice
@@ -309,6 +330,163 @@ def copy_setting(field: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Datos de mercado en directo (Etapa C1): callbacks y ayudantes
+# ---------------------------------------------------------------------------
+
+# Mensaje cuando un ticker curado no devuelve datos: como todos los de la
+# lista tienen opciones, lo más probable es un fallo de la fuente o de la red.
+MSG_CURATED_EMPTY = (
+    "Yahoo no devolvió datos para {label}: puede ser un problema temporal "
+    "de la fuente o de la conexión; prueba más tarde."
+)
+# Avisos de q que se muestran como nota (caption), no como advertencia.
+Q_NOTES = (MSG_Q_MISSING, MSG_Q_INDEX)
+
+
+def clear_loaded_data() -> None:
+    """Olvida los datos cargados (snapshot, vencimiento elegido y avisos)."""
+    st.session_state["snapshot"] = None
+    st.session_state["expiry_choice"] = None
+    st.session_state["load_notice"] = []
+
+
+def on_underlying_change() -> None:
+    """Cambia el tipo de subyacente: el ticker vuelve a "Entrada manual"."""
+    st.session_state["ticker_choice"] = MANUAL_ENTRY
+    clear_loaded_data()
+
+
+def on_ticker_change() -> None:
+    """Cambia el ticker (p. ej. SPY -> QQQ): los datos del anterior ya no valen.
+
+    Así nunca se muestra la cadena de SPY con la etiqueta QQQ: hay que
+    volver a pulsar "Cargar datos".
+    """
+    clear_loaded_data()
+
+
+def current_time() -> datetime:
+    """Hora actual con zona horaria (Nueva York).
+
+    Las pruebas ponen un reloj fijo en st.session_state["clock"].
+    """
+    clock = st.session_state.get("clock")
+    if clock is not None:
+        return clock()
+    return datetime.now(MARKET_TZ)
+
+
+def data_provider():
+    """Proveedor de datos: el de las pruebas o, por defecto, Yahoo Finance.
+
+    Yahoo se importa aquí dentro para que la app arranque aunque yfinance
+    falle. Devuelve None si no se puede crear el proveedor.
+    """
+    provider = st.session_state.get("data_provider")
+    if provider is not None:
+        return provider
+    try:
+        from datos.yahoo import YahooProvider
+
+        return YahooProvider()
+    except Exception:
+        return None
+
+
+def days_until(expiry: str) -> int:
+    """Días naturales desde hoy (fecha de mercado) hasta un vencimiento ISO."""
+    today = market_today(current_time())
+    return (date.fromisoformat(expiry) - today).days
+
+
+def explain_notice(message: str, label: str) -> str:
+    """Cambia el aviso de "respuesta vacía" por uno que sugiere la causa."""
+    if message == MSG_EMPTY:
+        return MSG_CURATED_EMPTY.format(label=label)
+    return message
+
+
+def fill_market_inputs(snapshot, notices: list[str]) -> None:
+    """Escribe spot, r y q del snapshot en los campos de la barra lateral.
+
+    - r: fracción -> % con 2 decimales (0.04122 -> 4.12).
+    - q de Yahoo: fracción -> % con 2 decimales.
+    - q no disponible (acción/ETF): q = 0 y nota.
+    - Índice: q NO se toca (el usuario lo edita) y nota C10.
+    Los campos siguen siendo editables.
+    """
+    st.session_state["spot"] = float(snapshot.spot)
+    st.session_state["rate_pct"] = round(snapshot.rate * 100, 2)
+    if snapshot.q_source == "indice":
+        note = MSG_Q_INDEX
+    elif snapshot.q is None:
+        st.session_state["q_pct"] = 0.0
+        note = MSG_Q_MISSING
+    else:
+        st.session_state["q_pct"] = round(snapshot.q * 100, 2)
+        note = None
+    if note is not None and note not in notices:
+        notices.append(note)
+
+
+def select_first_expiry(snapshot) -> None:
+    """Elige el primer vencimiento ofrecido y pone sus días (A2)."""
+    expiries = sorted(snapshot.chains)
+    if not expiries:
+        st.session_state["expiry_choice"] = None
+        return
+    st.session_state["expiry_choice"] = expiries[0]
+    st.session_state["days"] = days_until(expiries[0])
+
+
+def on_load_data() -> None:
+    """Botón "Cargar datos": trae spot, r, q y las cadenas líquidas.
+
+    Es un callback: se ejecuta ANTES de dibujar los widgets, así que puede
+    escribir `spot`, `rate_pct`, `q_pct` y `days` sin error de Streamlit.
+    Si el proveedor falla, se usan los datos guardados (si los hay) y los
+    avisos quedan en `load_notice`. Nunca deja escapar una excepción.
+    """
+    kind = st.session_state["underlying"]
+    label = st.session_state["ticker_choice"]
+    symbol = resolve_ticker(kind, label)
+    clear_loaded_data()
+    if symbol is None:
+        return
+    provider = data_provider()
+    if provider is None:
+        st.session_state["load_notice"] = [
+            "No se pudo preparar la conexión con Yahoo Finance. "
+            "Introduce los valores a mano."
+        ]
+        return
+
+    now = current_time()
+    snapshot, notices = load_or_cache(
+        symbol,
+        provider,
+        today=market_today(now),
+        now=now,
+        cache_dir=st.session_state.get("cache_dir"),
+        label=label,
+        is_index=(kind == "Índice"),
+    )
+    notices = [explain_notice(message, label) for message in notices]
+    if snapshot is not None:
+        fill_market_inputs(snapshot, notices)
+        select_first_expiry(snapshot)
+    st.session_state["snapshot"] = snapshot
+    st.session_state["load_notice"] = notices
+
+
+def on_expiry_change() -> None:
+    """Cambia el vencimiento: los días al vencimiento se ponen solos."""
+    expiry = st.session_state.get("expiry_choice")
+    if expiry:
+        st.session_state["days"] = days_until(expiry)
+
+
+# ---------------------------------------------------------------------------
 # Barra lateral (siempre se dibuja, en todas las pestañas)
 # ---------------------------------------------------------------------------
 
@@ -319,7 +497,10 @@ def render_sidebar() -> Market:
         st.header("Datos del mercado")
         st.caption("Valen para todas las patas (un único vencimiento común).")
         # Cada widget usa `key`: su valor vive en st.session_state[key].
-        st.selectbox("Tipo de subyacente", UNDERLYINGS, key="underlying")
+        st.selectbox(
+            "Tipo de subyacente", UNDERLYINGS, key="underlying", on_change=on_underlying_change
+        )
+        render_data_loader()
         st.number_input("Precio actual (spot)", step=1.0, format="%.2f", key="spot")
         st.number_input("Volatilidad anual (%)", step=1.0, format="%.2f", key="vol_pct")
         st.number_input("Días al vencimiento", step=1, key="days")
@@ -330,6 +511,53 @@ def render_sidebar() -> Market:
         for message in validate_market(market):
             st.error(message)
     return market
+
+
+def render_data_loader() -> None:
+    """Ticker, botón "Cargar datos", antigüedad, avisos y vencimiento (Etapa C1).
+
+    Con "Entrada manual" solo se ven el selector y el botón desactivado.
+    """
+    manual = st.session_state["ticker_choice"] == MANUAL_ENTRY
+    st.selectbox(
+        "Ticker",
+        ticker_options(st.session_state["underlying"]),
+        key="ticker_choice",
+        on_change=on_ticker_change,
+        help="Elige un ticker de la lista para cargar sus datos, o escribe tú los valores.",
+    )
+    st.button("Cargar datos", on_click=on_load_data, disabled=manual, key="load_data")
+
+    snapshot = st.session_state["snapshot"]
+    if snapshot is not None:
+        # Texto largo: va en caption (st.metric lo recortaría).
+        st.caption(age_text(snapshot))
+    for message in st.session_state["load_notice"]:
+        if message in Q_NOTES:
+            st.caption(message)
+        elif snapshot is None:
+            st.error(message)
+        else:
+            st.warning(message)
+    if snapshot is not None:
+        render_expiry_select(snapshot)
+
+
+def render_expiry_select(snapshot) -> None:
+    """Selector de vencimiento: solo los que tienen opciones líquidas."""
+    expiries = sorted(snapshot.chains)
+    if not expiries:
+        return
+    # Se ajusta ANTES de crear el widget (permitido por Streamlit).
+    if st.session_state.get("expiry_choice") not in expiries:
+        st.session_state["expiry_choice"] = expiries[0]
+    st.selectbox(
+        "Vencimiento",
+        expiries,
+        format_func=lambda expiry: f"{expiry} ({days_until(expiry)} días)",
+        key="expiry_choice",
+        on_change=on_expiry_change,
+    )
 
 
 # ---------------------------------------------------------------------------

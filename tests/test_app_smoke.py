@@ -635,3 +635,238 @@ def test_active_model_caption_and_warnings(app):
     assert any(text.startswith("Modelo activo: Black-Scholes (europeo)") for text in captions)
     infos = [info.value for info in app.tabs[1].info]
     assert MSG_AMERICAN in infos and MSG_BINOMIAL_ACTIVE not in infos
+
+
+# ---------------------------------------------------------------------------
+# Etapa C1, bloque 5: ticker, "Cargar datos", vencimiento y antigüedad.
+# Siempre con FakeProvider (sin red), caché en tmp_path y reloj fijo.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timedelta  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from datos import FakeProvider, NetworkError  # noqa: E402
+from datos.errors import MSG_NETWORK  # noqa: E402
+from datos.service import MSG_NO_CACHE, MSG_Q_INDEX, MSG_Q_MISSING  # noqa: E402
+
+# Reloj fijo: viernes 20/11/2026 10:30 en Nueva York.
+FIXED_NOW = datetime(2026, 11, 20, 10, 30, tzinfo=ZoneInfo("America/New_York"))
+
+
+def data_app(tmp_path, provider=None, now=FIXED_NOW) -> AppTest:
+    """App con proveedor falso, caché en tmp_path y reloj fijo inyectados."""
+    at = AppTest.from_file(APP_PATH, default_timeout=30)
+    at.session_state["data_provider"] = provider or FakeProvider(today=now)
+    at.session_state["cache_dir"] = str(tmp_path)
+    at.session_state["clock"] = lambda: now
+    at.run()
+    return at
+
+
+def choose_ticker(at: AppTest, underlying: str, ticker: str) -> AppTest:
+    """Elige tipo de subyacente y ticker en la barra lateral."""
+    if at.session_state["underlying"] != underlying:
+        at.selectbox(key="underlying").set_value(underlying).run()
+    at.selectbox(key="ticker_choice").set_value(ticker).run()
+    return at
+
+
+def load(at: AppTest) -> AppTest:
+    """Pulsa "Cargar datos"."""
+    at.button(key="load_data").click().run()
+    return at
+
+
+def expiry_selects(at: AppTest) -> list:
+    return [box for box in at.selectbox if box.label == "Vencimiento"]
+
+
+def captions(at: AppTest) -> list[str]:
+    return [caption.value for caption in at.caption]
+
+
+def test_manual_mode_is_default_and_inert(app):
+    state = app.session_state
+    assert state["ticker_choice"] == "Entrada manual"
+    assert state["snapshot"] is None
+    assert state["expiry_choice"] is None
+    assert state["load_notice"] == []
+    # Mismos valores por defecto que antes de la Etapa C1.
+    assert (state["spot"], state["vol_pct"], state["days"]) == (100.0, 20.0, 30)
+    assert (state["rate_pct"], state["q_pct"]) == (4.0, 0.0)
+    assert app.button(key="load_data").disabled
+    assert expiry_selects(app) == []
+    assert not app.error and not app.warning
+    assert not any("datos con" in text or "datos guardados" in text for text in captions(app))
+
+
+def test_ticker_options_follow_underlying(app):
+    assert app.selectbox(key="ticker_choice").options == [
+        "Entrada manual", "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
+    ]
+    app.selectbox(key="underlying").set_value("ETF").run()
+    assert app.selectbox(key="ticker_choice").options == ["Entrada manual", "SPY", "QQQ", "IWM"]
+    app.selectbox(key="underlying").set_value("Índice").run()
+    assert app.selectbox(key="ticker_choice").options == ["Entrada manual", "SPX"]
+
+
+def test_load_button_enabled_for_curated_ticker(tmp_path):
+    at = choose_ticker(data_app(tmp_path), "ETF", "SPY")
+    assert not at.exception
+    assert not at.button(key="load_data").disabled
+
+
+def test_load_fills_spot_rate_q_expiry_and_days(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    assert not at.exception
+    state = at.session_state
+    snapshot = state["snapshot"]
+    assert snapshot is not None and snapshot.source == "live"
+    assert state["spot"] == pytest.approx(snapshot.spot)
+    assert at.number_input(key="spot").value == pytest.approx(snapshot.spot)
+    # ^IRX 4,122 % -> 0.04122 -> 4.12 en la app.
+    assert state["rate_pct"] == 4.12
+    # trailingAnnualDividendYield de la fixture SPY: 0.0079093 -> 0.79 %.
+    assert state["q_pct"] == 0.79
+    # A2: primer vencimiento ofrecido y sus días con el reloj fijo (+10).
+    first = sorted(snapshot.chains)[0]
+    assert first == (FIXED_NOW.date() + timedelta(days=10)).isoformat()
+    assert state["expiry_choice"] == first
+    assert expiry_selects(at)[0].value == first
+    assert state["days"] == 10
+    assert not at.error
+
+
+def test_loaded_values_stay_editable(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    at.number_input(key="spot").set_value(123.0).run()
+    at.number_input(key="rate_pct").set_value(3.5).run()
+    at.number_input(key="q_pct").set_value(1.25).run()
+    assert not at.exception
+    assert at.session_state["spot"] == 123.0
+    assert at.session_state["rate_pct"] == 3.5
+    assert at.session_state["q_pct"] == 1.25
+
+
+def test_expiry_options_are_only_liquid_window_expiries(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    expected = [(FIXED_NOW.date() + timedelta(days=d)).isoformat() for d in (10, 17, 45, 90)]
+    assert expiry_selects(at)[0].options == [f"{e} ({d} días)" for e, d in zip(expected, (10, 17, 45, 90))]
+
+
+def test_changing_expiry_sets_days(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    target = (FIXED_NOW.date() + timedelta(days=45)).isoformat()
+    expiry_selects(at)[0].set_value(target).run()
+    assert not at.exception
+    assert at.session_state["expiry_choice"] == target
+    assert at.session_state["days"] == 45
+
+
+def test_age_caption_shows_load_time(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    hour = FIXED_NOW.astimezone().strftime("%H:%M")
+    assert f"datos con ~15 min de retraso; cargados a las {hour}" in captions(at)
+
+
+def test_other_clock_gives_same_relative_result(tmp_path):
+    other = datetime(2027, 3, 3, 15, 5, tzinfo=ZoneInfo("America/New_York"))
+    at = load(choose_ticker(data_app(tmp_path, FakeProvider(today=other), other), "ETF", "SPY"))
+    assert at.session_state["days"] == 10
+    assert at.session_state["expiry_choice"] == (other.date() + timedelta(days=10)).isoformat()
+    hour = other.astimezone().strftime("%H:%M")
+    assert f"datos con ~15 min de retraso; cargados a las {hour}" in captions(at)
+
+
+def test_missing_dividend_yield_sets_q_zero_with_caption(tmp_path):
+    provider = FakeProvider(today=FIXED_NOW, dividend_yield=None)
+    at = data_app(tmp_path, provider)
+    at.session_state["q_pct"] = 2.0
+    at = load(choose_ticker(at, "Acción", "AAPL"))
+    assert not at.exception
+    assert at.session_state["q_pct"] == 0.0
+    assert MSG_Q_MISSING in captions(at)
+    assert not at.error
+
+
+def test_index_load_keeps_q_and_shows_note(tmp_path):
+    at = choose_ticker(data_app(tmp_path), "Índice", "SPX")
+    at.number_input(key="q_pct").set_value(1.2).run()
+    at = load(at)
+    assert not at.exception
+    assert at.session_state["snapshot"].ticker == "SPX"
+    assert at.session_state["q_pct"] == 1.2  # C10: q no se toca
+    assert at.session_state["rate_pct"] == 4.12
+    assert MSG_Q_INDEX in captions(at)
+    assert "sin dividend yield para índices: edítalo, SPX ≈ 1,2 %" in captions(at)
+    # Caché con la etiqueta curada, nunca con "^".
+    assert (tmp_path / "SPX.json").exists()
+    assert not (tmp_path / "^SPX.json").exists()
+
+
+def test_provider_error_without_cache_shows_spanish_error(tmp_path):
+    before = 100.0
+    at = data_app(tmp_path, FakeProvider(today=FIXED_NOW, fail_with=NetworkError))
+    at = load(choose_ticker(at, "ETF", "SPY"))
+    assert not at.exception
+    assert at.session_state["snapshot"] is None
+    assert at.session_state["spot"] == before
+    errors = [error.value for error in at.error]
+    assert MSG_NETWORK in errors and MSG_NO_CACHE in errors
+    assert expiry_selects(at) == []
+
+
+def test_provider_error_with_cache_uses_saved_data(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    saved_spot = at.session_state["snapshot"].spot
+    # El proveedor cae; la segunda carga recurre a la caché guardada.
+    at.session_state["data_provider"] = FakeProvider(today=FIXED_NOW, fail_with=NetworkError)
+    at.session_state["spot"] = 50.0
+    at = load(at)
+    assert not at.exception
+    snapshot = at.session_state["snapshot"]
+    assert snapshot is not None and snapshot.source == "cache"
+    assert at.session_state["spot"] == pytest.approx(saved_spot)
+    when = FIXED_NOW.astimezone().strftime("%d/%m %H:%M")
+    assert f"datos guardados de {when}" in captions(at)
+    assert MSG_NETWORK in [warning.value for warning in at.warning]
+    assert not at.error
+    assert expiry_selects(at)
+
+
+def test_curated_ticker_without_expirations_suggests_source_problem(tmp_path):
+    at = data_app(tmp_path, FakeProvider(today=FIXED_NOW, offsets=()))
+    at = load(choose_ticker(at, "ETF", "SPY"))
+    assert not at.exception
+    errors = [error.value for error in at.error]
+    assert (
+        "Yahoo no devolvió datos para SPY: puede ser un problema temporal de la "
+        "fuente o de la conexión; prueba más tarde."
+    ) in errors
+    assert at.session_state["snapshot"] is None
+
+
+def test_underlying_change_resets_ticker_and_clears_snapshot(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    assert at.session_state["snapshot"] is not None
+    at.selectbox(key="underlying").set_value("Acción").run()
+    assert not at.exception
+    assert at.session_state["ticker_choice"] == "Entrada manual"
+    assert at.session_state["snapshot"] is None
+    assert at.session_state["load_notice"] == []
+    assert at.button(key="load_data").disabled
+    assert expiry_selects(at) == []
+
+
+def test_ticker_change_same_kind_clears_loaded_data(tmp_path):
+    # C-V1: SPY cargado -> QQQ sin pulsar "Cargar datos".
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    assert expiry_selects(at)
+    at.selectbox(key="ticker_choice").set_value("QQQ").run()
+    assert not at.exception
+    assert at.session_state["snapshot"] is None
+    assert at.session_state.get("expiry_choice") is None
+    assert at.session_state["load_notice"] == []
+    assert expiry_selects(at) == []
+    assert not any("cargados a las" in text for text in captions(at))
+    assert not at.button(key="load_data").disabled

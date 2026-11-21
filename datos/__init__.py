@@ -41,6 +41,13 @@ from datos.service import (
     load_with_notices,
     rate_from_percent,
 )
+from datos.tickers import (
+    CURATED_TICKERS,
+    MANUAL_ENTRY,
+    resolve_ticker,
+    ticker_options,
+    tickers_for,
+)
 from datos.types import MarketSnapshot, OptionQuote
 
 # yahoo.py importa yfinance solo dentro del constructor de YahooProvider,
@@ -79,4 +86,9 @@ __all__ = [
     "OptionQuote",
     "RateLimitError",
     "YahooProvider",
+    "CURATED_TICKERS",
+    "MANUAL_ENTRY",
+    "resolve_ticker",
+    "ticker_options",
+    "tickers_for",
 ]

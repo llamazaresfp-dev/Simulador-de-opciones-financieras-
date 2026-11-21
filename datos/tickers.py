@@ -21,6 +21,15 @@ CURATED_TICKERS = {
 # Etiquetas cuyo símbolo en Yahoo es distinto (los índices llevan "^").
 YAHOO_SYMBOLS = {"SPX": "^SPX"}
 
+# Histórico (Etapa C2): símbolos de Yahoo a probar EN ORDEN para cada
+# etiqueta. Para SPX se prueba ^GSPC y, solo si viene vacío, ^SPX.
+# Las etiquetas que no están aquí usan su propio ticker.
+HISTORY_SYMBOLS = {"SPX": ("^GSPC", "^SPX")}
+
+# Símbolo del histórico de la tasa libre de riesgo (letras a 13 semanas,
+# en porcentaje: 4.12 = 4,12 %).
+RATE_HISTORY_SYMBOL = "^IRX"
+
 
 def tickers_for(kind) -> list[str]:
     """Tickers curados de un tipo de subyacente (lista vacía si no existe)."""
@@ -41,3 +50,11 @@ def resolve_ticker(kind, name) -> str | None:
     if name not in CURATED_TICKERS.get(kind, []):
         return None
     return YAHOO_SYMBOLS.get(name, name)
+
+
+def history_symbols(label) -> tuple[str, ...]:
+    """Símbolos de Yahoo a probar, en orden, para el histórico de `label`.
+
+    ("^GSPC", "^SPX") para SPX; (label,) para el resto.
+    """
+    return HISTORY_SYMBOLS.get(label, (label,))

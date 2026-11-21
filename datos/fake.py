@@ -15,16 +15,30 @@ También puede simular fallos:
 
 Guarda qué se le ha pedido (`called`, `chain_calls`) para que las
 pruebas puedan comprobar, por ejemplo, que tras un 429 no se pide más.
+
+Histórico (Etapa C2, `get_history`): NO usa fixtures. Genera en código
+un movimiento browniano geométrico (GBM) determinista: días hábiles
+(lunes a viernes, sin festivos) contados hacia atrás desde el reloj
+inyectado y precios con `random.Random(semilla)`. La semilla es la suma
+de los códigos `ord` de las letras del símbolo (nunca `hash()`, que
+cambia entre ejecuciones de Python). Así dos llamadas iguales dan lo
+mismo, dos tickers dan series distintas y nada caduca con el tiempo real.
+`^IRX` devuelve una serie en PORCENTAJE (constante o con escalones).
+Registra cada llamada en `history_calls` (símbolo, inicio, fin).
 """
 
 import copy
 import json
+import math
+import random
 from datetime import date, timedelta
 from pathlib import Path
 
 from datos.cache import market_today
 from datos.errors import EmptyDataError
 from datos.service import rate_from_percent
+from datos.tickers import CURATED_TICKERS, HISTORY_SYMBOLS, RATE_HISTORY_SYMBOL
+from datos.types import PriceHistory
 
 # Vencimientos por defecto, en días desde hoy. El de +150 queda fuera
 # de la ventana 7–120 a propósito.
@@ -44,6 +58,64 @@ DEFAULT_IRX_PERCENT = 4.122
 
 # Valor centinela: "no se pasó este parámetro" (None sí es un valor válido).
 _NOT_GIVEN = object()
+
+# --- Histórico sintético (Etapa C2) ---
+
+# Años de historia que genera el proveedor falso (hacia atrás desde hoy).
+FAKE_HISTORY_YEARS = 30
+
+# Precio del primer día de la serie sintética (USD).
+FAKE_START_PRICE = 100.0
+
+# Sesiones por año para pasar mu y sigma anuales a diarios.
+TRADING_DAYS_PER_YEAR = 252
+
+# Cada cuántas sesiones se paga un dividendo (~un trimestre).
+DIVIDEND_EVERY_SESSIONS = 63
+
+
+def _known_history_symbols() -> set[str]:
+    """Símbolos con histórico en el proveedor falso.
+
+    Los tickers curados (salvo los que usan otros símbolos, como SPX),
+    los símbolos del índice (^GSPC, ^SPX) y la tasa (^IRX).
+    """
+    symbols = {RATE_HISTORY_SYMBOL}
+    for tickers in CURATED_TICKERS.values():
+        for label in tickers:
+            symbols.update(HISTORY_SYMBOLS.get(label, (label,)))
+    return symbols
+
+
+KNOWN_HISTORY_SYMBOLS = _known_history_symbols()
+
+
+def history_seed_for(symbol, seed=0) -> int:
+    """Semilla del histórico: suma de `ord` de las letras + `seed`."""
+    return sum(ord(char) for char in symbol) + seed
+
+
+def _years_before(day, years) -> date:
+    """La misma fecha `years` años naturales antes (29-feb -> 28-feb)."""
+    try:
+        return day.replace(year=day.year - years)
+    except ValueError:
+        return day.replace(year=day.year - years, day=28)
+
+
+def _business_days(first, last) -> list[date]:
+    """Días hábiles (lunes a viernes) entre `first` y `last`, ambos incluidos.
+
+    Se cuentan hacia atrás desde `last` y se devuelven en orden ascendente.
+    """
+    days = []
+    day = last
+    while day >= first:
+        if day.weekday() < 5:
+            days.append(day)
+        day -= timedelta(days=1)
+    days.reverse()
+    return days
 
 
 def _load_fixture(name) -> dict:
@@ -76,6 +148,18 @@ class FakeProvider:
     - fail_with: error que lanzan todas las llamadas.
     - chain_errors: {offset: error} para fallos de cadenas concretas.
     - dividend_error: error al pedir el dividend yield.
+
+    Parámetros del histórico (Etapa C2; con sus valores por defecto no
+    cambian nada de lo anterior):
+    - sigma, mu: volatilidad y crecimiento anuales del GBM sintético.
+    - seed: se suma a la semilla de cada símbolo (por defecto 0).
+    - dividends: rentabilidad anual por dividendo (fracción) para pagar
+      dividendos trimestrales; None = sin dividendos. Nunca en índices.
+    - irx_percent_series: escalones de ^IRX como pares (fecha ISO,
+      porcentaje); antes del primero vale `irx_percent`.
+    - history_empty_symbols: símbolos que responden vacío (EmptyDataError).
+    - history_fail_symbols: {símbolo: error} que lanza `get_history`.
+    - history_years: tope de años de historia (para fuentes "cortas").
     """
 
     def __init__(
@@ -90,6 +174,14 @@ class FakeProvider:
         fail_with=None,
         chain_errors=None,
         dividend_error=None,
+        sigma=0.20,
+        mu=0.07,
+        seed=0,
+        dividends=None,
+        irx_percent_series=None,
+        history_empty_symbols=None,
+        history_fail_symbols=None,
+        history_years=None,
     ):
         self.today = market_today(today)
         self.offsets = tuple(offsets)
@@ -104,6 +196,19 @@ class FakeProvider:
         # Registro de llamadas: nombres de método y vencimientos pedidos.
         self.called = []
         self.chain_calls = []
+        # Histórico (Etapa C2).
+        self.sigma = sigma
+        self.mu = mu
+        self.seed = seed
+        self.dividends = dividends
+        self.irx_percent_series = tuple(sorted(irx_percent_series or ()))
+        self.history_empty_symbols = set(history_empty_symbols or ())
+        self.history_fail_symbols = dict(history_fail_symbols or {})
+        self.history_years = history_years
+        # Registro de llamadas a get_history: (símbolo, inicio, fin).
+        self.history_calls = []
+        # Series ya generadas, por símbolo (se generan una sola vez).
+        self._generated = {}
 
     # --- Ayudantes internos ---
 
@@ -162,3 +267,90 @@ class FakeProvider:
         if self.dividend_yield is not _NOT_GIVEN:
             return self.dividend_yield
         return FIXTURE_DIVIDEND_YIELDS.get(self._fixture_name(ticker))
+
+    # --- Interfaz HistoryProvider (Etapa C2) ---
+
+    def get_history(self, symbol, start, end) -> PriceHistory:
+        """Histórico diario sintético entre `start` (incluido) y `end` (excluido).
+
+        - Símbolo desconocido, en `history_empty_symbols` o tramo sin días
+          hábiles -> EmptyDataError.
+        - Símbolo en `history_fail_symbols` (o `fail_with`) -> ese error.
+        - Con `history_years`, además no devuelve nada anterior a
+          `today - history_years` años.
+        """
+        self.history_calls.append((symbol, start, end))
+        self._start("get_history")
+        if symbol in self.history_fail_symbols:
+            _raise(self.history_fail_symbols[symbol])
+        if symbol in self.history_empty_symbols or symbol not in KNOWN_HISTORY_SYMBOLS:
+            raise EmptyDataError()
+
+        first = start
+        if self.history_years is not None:
+            first = max(start, _years_before(self.today, self.history_years))
+        first_iso = first.isoformat()
+        end_iso = end.isoformat()
+
+        dates, close, adj_close, dividends = self._full_history(symbol)
+        keep = [i for i, day in enumerate(dates) if first_iso <= day < end_iso]
+        if not keep:
+            raise EmptyDataError()
+        return PriceHistory(
+            ticker=symbol,
+            dates=tuple(dates[i] for i in keep),
+            close=tuple(close[i] for i in keep),
+            adj_close=tuple(adj_close[i] for i in keep),
+            dividends=tuple((day, amount) for day, amount in dividends if first_iso <= day < end_iso),
+        )
+
+    def _full_history(self, symbol):
+        """Serie completa de un símbolo: (fechas, cierre, ajustado, dividendos).
+
+        Abarca FAKE_HISTORY_YEARS años hasta hoy y se genera una sola vez.
+        """
+        if symbol not in self._generated:
+            days = _business_days(_years_before(self.today, FAKE_HISTORY_YEARS), self.today)
+            dates = [day.isoformat() for day in days]
+            if symbol == RATE_HISTORY_SYMBOL:
+                close = [self._irx_on(day) for day in dates]
+                series = (dates, close, list(close), [])
+            else:
+                series = self._gbm_history(symbol, dates)
+            self._generated[symbol] = series
+        return self._generated[symbol]
+
+    def _irx_on(self, day) -> float:
+        """^IRX (porcentaje) de un día: el último escalón con fecha <= día."""
+        value = self.irx_percent
+        for step_day, step_value in self.irx_percent_series:
+            if step_day <= day:
+                value = step_value
+        return value
+
+    def _gbm_history(self, symbol, dates):
+        """Precios GBM deterministas, con dividendos trimestrales opcionales."""
+        rng = random.Random(history_seed_for(symbol, self.seed))
+        dt = 1 / TRADING_DAYS_PER_YEAR
+        drift = (self.mu - self.sigma**2 / 2) * dt
+        shock = self.sigma * math.sqrt(dt)
+        close = [FAKE_START_PRICE]
+        for _ in range(len(dates) - 1):
+            close.append(close[-1] * math.exp(drift + shock * rng.gauss(0.0, 1.0)))
+
+        # Dividendos: cada DIVIDEND_EVERY_SESSIONS sesiones (nunca en índices).
+        paid = {}
+        if self.dividends and not symbol.startswith("^"):
+            for i in range(DIVIDEND_EVERY_SESSIONS, len(dates), DIVIDEND_EVERY_SESSIONS):
+                paid[i] = close[i - 1] * self.dividends / 4
+
+        # Cierre ajustado: cada dividendo rebaja los cierres ANTERIORES a
+        # su fecha con el factor (1 - dividendo / cierre del día previo).
+        adj_close = [0.0] * len(close)
+        factor = 1.0
+        for i in range(len(close) - 1, -1, -1):
+            adj_close[i] = close[i] * factor
+            if i in paid:
+                factor *= 1 - paid[i] / close[i - 1]
+        dividends = [(dates[i], paid[i]) for i in sorted(paid)]
+        return dates, close, adj_close, dividends

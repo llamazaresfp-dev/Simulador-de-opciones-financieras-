@@ -31,7 +31,7 @@ from datos.filters import (
     filter_chain,
     is_expiry_in_window,
 )
-from datos.provider import MarketDataProvider
+from datos.provider import HistoryProvider, MarketDataProvider
 from datos.service import (
     age_text,
     cache_age_text,
@@ -43,12 +43,15 @@ from datos.service import (
 )
 from datos.tickers import (
     CURATED_TICKERS,
+    HISTORY_SYMBOLS,
     MANUAL_ENTRY,
+    RATE_HISTORY_SYMBOL,
+    history_symbols,
     resolve_ticker,
     ticker_options,
     tickers_for,
 )
-from datos.types import MarketSnapshot, OptionQuote
+from datos.types import MarketSnapshot, OptionQuote, PriceHistory
 
 # yahoo.py importa yfinance solo dentro del constructor de YahooProvider,
 # así que reexportarlo aquí no carga yfinance ni pandas.
@@ -91,4 +94,10 @@ __all__ = [
     "resolve_ticker",
     "ticker_options",
     "tickers_for",
+    # Etapa C2: histórico del subyacente.
+    "HISTORY_SYMBOLS",
+    "HistoryProvider",
+    "PriceHistory",
+    "RATE_HISTORY_SYMBOL",
+    "history_symbols",
 ]

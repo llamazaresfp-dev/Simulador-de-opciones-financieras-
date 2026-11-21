@@ -65,3 +65,25 @@ class MarketSnapshot:
     chains: dict[str, list[OptionQuote]]
     source: str
     complete: bool = True
+
+
+@dataclass(frozen=True)
+class PriceHistory:
+    """Histórico diario de precios de un símbolo (Etapa C2).
+
+    - ticker: símbolo o etiqueta curada ("SPY", "SPX", "^IRX").
+    - dates: fechas ISO "YYYY-MM-DD" en orden ascendente.
+    - close: cierre de cada día, sin ajustar (USD; en ^IRX, porcentaje).
+    - adj_close: cierre ajustado por dividendos (misma longitud que close).
+    - dividends: pares (fecha ISO, importe en USD) de cada dividendo.
+    - source: "live" (recién descargado) o "cache" (leído del disco).
+    - loaded_at: fecha y hora de la descarga, con zona, o None.
+    """
+
+    ticker: str
+    dates: tuple[str, ...]
+    close: tuple[float, ...]
+    adj_close: tuple[float, ...]
+    dividends: tuple[tuple[str, float], ...]
+    source: str = "live"
+    loaded_at: datetime | None = None

@@ -11,6 +11,13 @@ Cumple la interfaz MarketDataProvider (ver provider.py):
 - get_dividend_yield: `trailingAnnualDividendYield` (fracción), NO
   `dividendYield` (que llega en porcentaje).
 
+Cumple también la interfaz HistoryProvider (Etapa C2):
+- get_history: `Ticker.history(start, end, interval="1d",
+  auto_adjust=False, actions=True)` -> PriceHistory con cierre, cierre
+  ajustado y dividendos (> 0). ^IRX se devuelve en porcentaje, SIN
+  convertir (la conversión la hace `datos.history_service`). Los NaN
+  quedan como NaN: los descarta `clean_history`.
+
 `yfinance` se importa DENTRO del constructor: así `import datos` no carga
 yfinance ni pandas (la app arranca rápido y los tests no lo necesitan).
 Este módulo no importa pandas: solo usa los métodos de las tablas que
@@ -23,10 +30,12 @@ respuesta vacía o con formato inesperado -> EmptyDataError.
 """
 
 import math
+from datetime import date, datetime
 from pathlib import Path
 
 from datos.errors import DatosError, EmptyDataError, NetworkError, RateLimitError
 from datos.service import rate_from_percent
+from datos.types import PriceHistory
 
 # Segundos máximos por solicitud HTTP (yfinance usa 30 por defecto).
 DEFAULT_TIMEOUT = 10
@@ -141,6 +150,51 @@ def _frame_to_rows(frame, kind) -> list[dict]:
             row[CHAIN_COLUMNS[column]] = _plain_number(record.get(column))
         rows.append(row)
     return rows
+
+
+def _index_to_iso(value) -> str:
+    """Una fecha del índice de la tabla (Timestamp, date o texto) -> ISO."""
+    if isinstance(value, datetime):
+        # Timestamp de pandas (subclase de datetime): fecha de su zona.
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)[:10]
+
+
+def _column(frame, name) -> list | None:
+    """Valores de una columna como floats (NaN si no hay número), o None si falta."""
+    if name not in list(frame.columns):
+        return None
+    values = []
+    for value in frame[name].tolist():
+        number = _plain_number(value)
+        values.append(math.nan if number is None else number)
+    return values
+
+
+def _frame_to_history(frame, symbol) -> PriceHistory:
+    """Tabla de `Ticker.history` -> PriceHistory (sin importar pandas)."""
+    if frame is None or getattr(frame, "empty", True):
+        raise EmptyDataError()
+    dates = [_index_to_iso(value) for value in frame.index]
+    close = _column(frame, "Close")
+    if close is None:
+        raise EmptyDataError()
+    adj_close = _column(frame, "Adj Close")
+    if adj_close is None:
+        adj_close = list(close)
+    paid = _column(frame, "Dividends") or []
+    dividends = tuple(
+        (day, amount) for day, amount in zip(dates, paid) if math.isfinite(amount) and amount > 0
+    )
+    return PriceHistory(
+        ticker=symbol,
+        dates=tuple(dates),
+        close=tuple(close),
+        adj_close=tuple(adj_close),
+        dividends=dividends,
+    )
 
 
 # --- Traducción de errores ---
@@ -291,5 +345,22 @@ class YahooProvider:
             if value is None or value < 0:
                 return None
             return value
+
+        return self._call(fetch)
+
+    # --- Interfaz HistoryProvider (Etapa C2) ---
+
+    def get_history(self, symbol, start, end) -> PriceHistory:
+        """Histórico diario de `symbol` entre `start` (incluido) y `end` (excluido).
+
+        Sin ajuste automático, para tener a la vez el cierre normal, el
+        ajustado y los dividendos. Tabla vacía -> EmptyDataError.
+        """
+
+        def fetch():
+            frame = self._ticker(symbol).history(
+                start=start, end=end, interval="1d", auto_adjust=False, actions=True
+            )
+            return _frame_to_history(frame, symbol)
 
         return self._call(fetch)

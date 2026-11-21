@@ -146,8 +146,29 @@ def init_state() -> None:
         add_leg()  # empezamos con una call comprada en el dinero
 
 
-def new_leg_dict(kind: str, side: int, quantity: float, strike, price: float) -> dict:
-    """Crea el diccionario de una pata con un id nuevo."""
+def new_leg_dict(
+    kind: str,
+    side: int,
+    quantity: float,
+    strike,
+    price: float,
+    premium_manual: bool = False,
+    premium_source=None,
+    bid=None,
+    ask=None,
+    iv_yahoo=None,
+    expiry=None,
+) -> dict:
+    """Crea el diccionario de una pata con un id nuevo.
+
+    Los campos opcionales solo los usan las patas "de mercado" (Etapa C1),
+    añadidas desde la cadena real:
+    - premium_source: "mercado" (prima = mid), "manual" (el usuario la
+      editó después) o None (pata normal).
+    - bid, ask: cotización de la que sale el mid.
+    - iv_yahoo: IV publicada por Yahoo (fracción), SOLO como referencia.
+    - expiry: vencimiento ISO de la cotización.
+    """
     leg_id = st.session_state["next_leg_id"]
     st.session_state["next_leg_id"] = leg_id + 1
     return {
@@ -157,8 +178,27 @@ def new_leg_dict(kind: str, side: int, quantity: float, strike, price: float) ->
         "quantity": float(quantity),
         "strike": None if strike is None else float(strike),
         "price": float(price),
-        "premium_manual": False,
+        "premium_manual": premium_manual,
+        "premium_source": premium_source,
+        "bid": bid,
+        "ask": ask,
+        "iv_yahoo": iv_yahoo,
+        "expiry": expiry,
     }
+
+
+def is_market_leg(leg: dict) -> bool:
+    """True si la prima de la pata es el mid de una cotización real."""
+    return leg.get("premium_source") == "mercado"
+
+
+def clear_market_fields(leg: dict) -> None:
+    """Olvida la cotización de la que salía la pata (ya no es de mercado)."""
+    leg["premium_source"] = None
+    leg["bid"] = None
+    leg["ask"] = None
+    leg["iv_yahoo"] = None
+    leg["expiry"] = None
 
 
 def find_leg(leg_id: int) -> dict | None:
@@ -234,9 +274,10 @@ def refresh_auto_prices(market: Market) -> None:
       usuario lo elige en Ajustes).
     - Acción: precio de entrada = spot actual.
     Las primas manuales se respetan aunque cambien los datos globales.
+    Las patas de mercado (prima = mid real) tampoco se tocan nunca.
     """
     for leg in st.session_state["legs"]:
-        if leg["premium_manual"]:
+        if leg["premium_manual"] or is_market_leg(leg):
             continue
         if leg["kind"] == "stock":
             leg["price"] = float(market.spot)
@@ -267,6 +308,11 @@ def on_leg_field_change(leg_id: int, field: str) -> None:
     if leg is None:
         return
     leg[field] = st.session_state[f"leg_{leg_id}_{field}"]
+    if field == "strike" and is_market_leg(leg):
+        # Otro strike = otro contrato: la prima ya no es el mid de su
+        # cotización. Se conserva como prima manual.
+        clear_market_fields(leg)
+        leg["premium_source"] = "manual"
 
 
 def on_kind_change(leg_id: int) -> None:
@@ -276,6 +322,7 @@ def on_kind_change(leg_id: int) -> None:
         return
     leg["kind"] = st.session_state[f"leg_{leg_id}_kind"]
     leg["premium_manual"] = False
+    clear_market_fields(leg)
     if leg["kind"] == "stock":
         leg["strike"] = None
     elif leg["strike"] is None:
@@ -289,6 +336,9 @@ def on_premium_change(leg_id: int) -> None:
         return
     leg["price"] = st.session_state[f"leg_{leg_id}_price"]
     leg["premium_manual"] = True
+    if leg.get("premium_source") is not None:
+        # Era una pata de mercado: ahora la prima la ha puesto el usuario.
+        leg["premium_source"] = "manual"
 
 
 def reset_premium(leg_id: int) -> None:
@@ -296,6 +346,7 @@ def reset_premium(leg_id: int) -> None:
     leg = find_leg(leg_id)
     if leg is not None:
         leg["premium_manual"] = False
+        clear_market_fields(leg)
 
 
 def open_template(template_key: str) -> None:
@@ -486,6 +537,63 @@ def on_expiry_change() -> None:
         st.session_state["days"] = days_until(expiry)
 
 
+def selected_chain() -> list:
+    """Cotizaciones líquidas del vencimiento elegido ([] si no hay datos).
+
+    Todo lo que ofrece el selector de patas reales sale de aquí, es decir,
+    de `snapshot.chains`, que ya viene filtrado (solo opciones líquidas).
+    """
+    snapshot = st.session_state.get("snapshot")
+    expiry = st.session_state.get("expiry_choice")
+    if snapshot is None or expiry not in snapshot.chains:
+        return []
+    return snapshot.chains[expiry]
+
+
+def quotes_of_kind(chain: list, kind: str) -> list:
+    """Cotizaciones de un tipo ("call" o "put"), ordenadas por strike."""
+    return sorted((quote for quote in chain if quote.kind == kind), key=lambda q: q.strike)
+
+
+def find_quote(chain: list, kind: str, strike: float):
+    """La cotización de ese tipo y strike, o None si no está."""
+    for quote in chain:
+        if quote.kind == kind and quote.strike == strike:
+            return quote
+    return None
+
+
+def on_add_market_leg() -> None:
+    """Botón "Añadir pata" del selector de cadena real.
+
+    La prima es el mid (bid+ask)/2, NUNCA el último precio negociado.
+    La pata queda como prima fija (premium_manual=True, premium_source
+    "mercado"): el modelo no la recalcula. La IV de Yahoo se guarda solo
+    para mostrarla como referencia.
+    """
+    quote = find_quote(
+        selected_chain(),
+        st.session_state.get("pick_kind"),
+        st.session_state.get("pick_strike"),
+    )
+    if quote is None:
+        return
+    leg = new_leg_dict(
+        quote.kind,
+        st.session_state.get("pick_side", 1),
+        st.session_state.get("pick_quantity", 1.0),
+        quote.strike,
+        quote.mid,
+        premium_manual=True,
+        premium_source="mercado",
+        bid=quote.bid,
+        ask=quote.ask,
+        iv_yahoo=quote.iv_yahoo,
+        expiry=st.session_state["expiry_choice"],
+    )
+    st.session_state["legs"].append(leg)
+
+
 # ---------------------------------------------------------------------------
 # Barra lateral (siempre se dibuja, en todas las pestañas)
 # ---------------------------------------------------------------------------
@@ -608,7 +716,9 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
     st.subheader("Constructor de estrategias")
     st.caption(active_model_caption(market))
     render_leg_rows(market)
+    render_expiry_mismatch_warnings()
     st.button("+ añadir pata", on_click=add_leg)
+    render_chain_picker()
     st.divider()
 
     legs = legs_from_state()
@@ -627,6 +737,87 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
         render_scenarios(market, legs)
 
     render_notices(market)
+
+
+def chain_picker_visible() -> bool:
+    """El selector de patas reales solo existe con datos cargados (no en manual)."""
+    return (
+        st.session_state["ticker_choice"] != MANUAL_ENTRY
+        and st.session_state.get("snapshot") is not None
+        and bool(selected_chain())
+    )
+
+
+def quote_label(quote) -> str:
+    """Texto de una opción en la lista: strike, bid/ask/mid e IV de Yahoo."""
+    if quote.iv_yahoo is None:
+        iv_text = "IV Yahoo —"
+    else:
+        iv_text = f"IV Yahoo {quote.iv_yahoo * 100:.1f} %"
+    return (
+        f"{quote.strike:.2f} · bid {quote.bid:.2f} / ask {quote.ask:.2f} / "
+        f"mid {quote.mid:.2f} · {iv_text}"
+    )
+
+
+def render_chain_picker() -> None:
+    """Desplegable para añadir una pata desde la cadena real (Etapa C1).
+
+    Solo ofrece opciones líquidas del vencimiento elegido en la barra
+    lateral. Los widgets solo guardan la elección; la pata se crea en el
+    callback del botón (on_add_market_leg).
+    """
+    if not chain_picker_visible():
+        return
+    chain = selected_chain()
+    expiry = st.session_state["expiry_choice"]
+    with st.expander("Añadir pata desde la cadena real"):
+        st.caption(
+            f"Solo opciones líquidas del vencimiento {expiry}. La prima será el mid "
+            "(punto medio entre bid y ask); la IV de Yahoo es solo una referencia."
+        )
+        # Valores iniciales de los widgets (solo la primera vez).
+        st.session_state.setdefault("pick_kind", "call")
+        st.session_state.setdefault("pick_side", 1)
+        st.session_state.setdefault("pick_quantity", 1.0)
+        cols = st.columns([1.0, 1.4, 1.0])
+        cols[0].selectbox("Tipo", ["call", "put"], format_func=KIND_LABELS.get, key="pick_kind")
+        cols[1].selectbox("Dirección", list(SIDE_LABELS), format_func=SIDE_LABELS.get, key="pick_side")
+        cols[2].number_input("Contratos", min_value=1.0, step=1.0, format="%g", key="pick_quantity")
+        render_strike_select(chain)
+
+
+def render_strike_select(chain: list) -> None:
+    """Lista de strikes líquidos del tipo elegido y botón "Añadir pata"."""
+    quotes = quotes_of_kind(chain, st.session_state["pick_kind"])
+    if not quotes:
+        st.caption("No hay opciones líquidas de este tipo en este vencimiento.")
+        return
+    labels = {quote.strike: quote_label(quote) for quote in quotes}
+    # Se ajusta ANTES de crear el widget (al cambiar call/put o vencimiento).
+    if st.session_state.get("pick_strike") not in labels:
+        st.session_state["pick_strike"] = quotes[0].strike
+    st.selectbox("Strike", list(labels), format_func=labels.get, key="pick_strike")
+    st.button("Añadir pata", key="add_market_leg", on_click=on_add_market_leg)
+
+
+def render_expiry_mismatch_warnings() -> None:
+    """Aviso si una pata de mercado es de otro vencimiento que el elegido.
+
+    La app usa un único vencimiento común (los días de la barra lateral);
+    la pata no se borra, solo se avisa.
+    """
+    selected = st.session_state.get("expiry_choice")
+    if not selected:
+        return
+    for number, leg in enumerate(st.session_state["legs"], start=1):
+        expiry = leg.get("expiry")
+        if expiry and expiry != selected:
+            st.warning(
+                f"Pata {number}: su cotización es del vencimiento {expiry}, pero el "
+                f"vencimiento elegido es {selected}. La app calcula todas las patas "
+                "con un único vencimiento (los días de la barra lateral)."
+            )
 
 
 def active_model_caption(market: Market) -> str:
@@ -677,7 +868,9 @@ def reset_label_and_help(is_stock: bool, binomial: bool) -> tuple[str, str]:
 
 
 def price_origin(leg: dict, binomial: bool) -> str:
-    """De dónde sale el precio de la pata: manual, spot, binomial o Black-Scholes."""
+    """De dónde sale el precio de la pata: mercado, manual, spot, binomial o Black-Scholes."""
+    if is_market_leg(leg):
+        return f"mercado (mid de bid {leg['bid']:.2f} / ask {leg['ask']:.2f})"
     if leg["premium_manual"]:
         return "manual"
     if leg["kind"] == "stock":
@@ -970,15 +1163,24 @@ def render_leg_iv(number: int, item: dict, market: Market) -> None:
     result = implied_vol(leg_from_dict(item), market)
     if result.vol is None:
         st.caption(f"{name}: {result.message}")
+        render_yahoo_iv(item)
         return
     vol_pct = round(result.vol * 100, 2)
     st.caption(f"{name}: volatilidad implícita {vol_pct:.2f} %")
+    render_yahoo_iv(item)
     st.button(
         "Usar como volatilidad global",
         key=f"use_iv_{item['id']}",
         on_click=use_iv_as_global,
         args=(vol_pct,),
     )
+
+
+def render_yahoo_iv(item: dict) -> None:
+    """IV publicada por Yahoo, solo como referencia (no entra en ningún cálculo)."""
+    iv_yahoo = item.get("iv_yahoo")
+    if iv_yahoo is not None:
+        st.caption(f"IV Yahoo (referencia): {iv_yahoo * 100:.2f} %")
 
 
 def build_histogram(result) -> go.Figure:

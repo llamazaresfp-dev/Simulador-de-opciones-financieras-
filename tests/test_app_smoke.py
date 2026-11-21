@@ -870,3 +870,106 @@ def test_ticker_change_same_kind_clears_loaded_data(tmp_path):
     assert expiry_selects(at) == []
     assert not any("cargados a las" in text for text in captions(at))
     assert not at.button(key="load_data").disabled
+
+
+# ---------------------------------------------------------------------------
+# Etapa C1, bloque 6: selector de patas reales, premium_source, IV de Yahoo
+# como referencia y aviso de vencimiento distinto.
+# ---------------------------------------------------------------------------
+
+PICKER_LABEL = "Añadir pata desde la cadena real"
+
+
+def picker_shown(at: AppTest) -> bool:
+    return PICKER_LABEL in [expander.label for expander in at.expander]
+
+
+def add_real_leg(at: AppTest, kind: str = "call", strike: float = 700.0) -> dict:
+    """Añade una pata desde la cadena real y devuelve la pata nueva."""
+    at.selectbox(key="pick_kind").set_value(kind).run()
+    at.selectbox(key="pick_strike").set_value(strike).run()
+    at.button(key="add_market_leg").click().run()
+    assert not at.exception
+    return at.session_state["legs"][-1]
+
+
+def test_manual_mode_has_no_chain_picker(app):
+    assert not picker_shown(app)
+    assert not any(str(button.key) == "add_market_leg" for button in app.button)
+    # Las patas normales no tienen origen de mercado.
+    assert all(leg["premium_source"] is None for leg in app.session_state["legs"])
+
+
+def test_chain_picker_disappears_when_ticker_changes(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    assert picker_shown(at)
+    at.selectbox(key="ticker_choice").set_value("QQQ").run()
+    assert not at.exception
+    assert not picker_shown(at)
+
+
+def test_market_leg_caption_and_manual_edit(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    assert f"Pata 2: precio mercado (mid de bid {leg['bid']:.2f} / ask {leg['ask']:.2f})." in captions(at)
+    # El usuario edita la prima: deja de ser "de mercado".
+    at.number_input(key=f"leg_{leg['id']}_price").set_value(20.0).run()
+    edited = at.session_state["legs"][-1]
+    assert edited["premium_source"] == "manual"
+    assert edited["price"] == 20.0 and edited["premium_manual"]
+    assert "Pata 2: precio manual." in captions(at)
+
+
+def test_reset_clears_market_source(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    at.button(key=f"leg_{leg['id']}_reset").click().run()
+    reset = at.session_state["legs"][-1]
+    assert not reset["premium_manual"]
+    assert reset["premium_source"] is None and reset["iv_yahoo"] is None
+    assert reset["price"] == pytest.approx(default_premium("call", app_market(at, "binomial"), 700.0))
+
+
+def test_kind_change_clears_market_source(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    at.selectbox(key=f"leg_{leg['id']}_kind").set_value("put").run()
+    changed = at.session_state["legs"][-1]
+    assert not changed["premium_manual"]
+    assert changed["premium_source"] is None and changed["expiry"] is None
+
+
+def test_strike_edit_turns_market_leg_into_manual(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    at.number_input(key=f"leg_{leg['id']}_strike").set_value(705.0).run()
+    edited = at.session_state["legs"][-1]
+    assert edited["premium_source"] == "manual" and edited["premium_manual"]
+    assert edited["price"] == pytest.approx(leg["price"])
+    assert edited["iv_yahoo"] is None
+
+
+def test_yahoo_iv_only_shown_as_reference(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    texts = expander_texts(scenarios_expander(at))
+    reference = f"IV Yahoo (referencia): {leg['iv_yahoo'] * 100:.2f} %"
+    assert reference in texts
+    # Solo aparece con el rótulo "referencia"; la IV del motor va aparte.
+    assert sum("IV Yahoo" in text for text in texts) == 1
+    assert any("Pata 2 (Call, strike 700.00): volatilidad implícita" in text for text in texts)
+
+
+def test_expiry_mismatch_shows_warning_and_keeps_leg(tmp_path):
+    at = load(choose_ticker(data_app(tmp_path), "ETF", "SPY"))
+    leg = add_real_leg(at)
+    assert not any("vencimiento elegido" in w.value for w in at.warning)
+    other = (FIXED_NOW.date() + timedelta(days=45)).isoformat()
+    expiry_selects(at)[0].set_value(other).run()
+    assert not at.exception
+    warnings = [w.value for w in at.warning]
+    assert any(
+        f"Pata 2: su cotización es del vencimiento {leg['expiry']}" in w and other in w
+        for w in warnings
+    )
+    assert at.session_state["legs"][-1]["id"] == leg["id"]

@@ -2,9 +2,9 @@
 name: etapa-c1-datos-directo PLAN
 description: "Plan COMPLEX de la Etapa C1 (datos de mercado en directo de Yahoo Finance, solo opciones líquidas, con caché local) de Laboratorio de Opciones, en 7 bloques secuenciales cada uno cerrado con pytest verde."
 date: 20-11-26
-status: planned
+status: completed
 complexity: complex
-spec: process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md
+spec: process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md
 ---
 
 # Plan: Etapa C1 — Datos de mercado en directo en el constructor
@@ -12,7 +12,7 @@ spec: process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-dato
 **Date**: 20-11-26
 **Complexity**: COMPLEX (un solo plan, un solo flujo de ejecución, 7 bloques secuenciales; no es phase program)
 **Status**: ⏳ PLANNED (PLAN escrito 20-11-26; ningún bloque ejecutado)
-**SPEC bloqueado**: `process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md` (AC-C1-1..AC-C1-16, decisiones C1–C9, huecos C-G1..C-G10; valores propuestos ya aprobados por el usuario)
+**SPEC bloqueado**: `process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md` (AC-C1-1..AC-C1-16, decisiones C1–C9, huecos C-G1..C-G10; valores propuestos ya aprobados por el usuario)
 **Entorno**: Python 3.12.3, `.venv` (numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0, pandas 3.1.1 ya presente por Streamlit); línea base: `.venv/bin/pytest -q` → **2330 passed, 2 skipped** (HEAD c31c356, rama main; sin cambios sin confirmar salvo esta carpeta de tarea con el SPEC)
 
 **TL;DR:** un paquete nuevo de nivel superior `datos/` (fuera del motor `opciones/`, que no cambia) trae precio, tasa y dividend yield de Yahoo Finance (`yfinance==1.8.0`) detrás de una interfaz de proveedor intercambiable, filtra la cadena a **solo opciones líquidas** con reglas en un único lugar, y guarda cada carga en una caché local ignorada por git. `app.py` gana una cascada Tipo → Ticker → "Cargar datos" → Vencimiento, un selector de patas reales (prima = mid, IV del motor, IV de Yahoo solo como referencia) y un texto de antigüedad. La suite normal **no usa red** (bloqueo automático en `conftest.py`); una prueba en vivo opcional se activa con `LIVE_DATA=1`. Cada bloque cierra con `.venv/bin/pytest -q` completo en verde.
@@ -125,7 +125,7 @@ Status: ⏳ PLANNED · 🔨 CODE DONE · 🧪 TESTING · ✅ VERIFIED · 🚧 BL
 
 Regla honesta: un bloque con tests verdes y sin revisión del usuario es `🔨 CODE DONE`, no `✅ VERIFIED`. Solo el usuario pasa un bloque a `✅ VERIFIED`. **Lección del MVP/Etapas A y B1:** vc-execute-agent no puede escribir bajo `process/`; las actualizaciones de estado de este plan y el reporte se hacen en UPDATE PROCESS.
 
-Reporte (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_REPORT_20-11-26.md`.
+Reporte (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_REPORT_20-11-26.md`.
 
 ## Acceptance Criteria
 
@@ -412,10 +412,10 @@ C2 (histórico del subyacente, backtest sintético y calibración); histórico d
 
 ## Resume and Execution Handoff
 
-1. **Plan file:** `process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md` (execute-anchor).
+1. **Plan file:** `process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md` (execute-anchor).
 2. **Last completed phase/step:** PLAN escrito (20-11-26) y suplemento PVL aplicado (C-V1..C-V5: `on_ticker_change`, reloj inyectable + `FakeProvider` relativo, tolerancia `EPS` + filas de borde, robustez de carga/caché, bloque 3 dividido en 3a–3d); suplemento 2 (C-V6 + A1–A3): orden 3c caché → 3d servicio, `offsets` en `FakeProvider`, `expiry_choice`/`days` explícitos, zonas horarias; ningún bloque ejecutado.
 3. **Validate-contract status:** first-pass CONDITIONAL (5 CONCERN) escrito; el suplemento está aplicado; vc-validate-agent debe re-validar desde V1 y emitir el nuevo veredicto (sustituye al anterior).
-4. **Supporting context files loaded:** SPEC de la Etapa C1 (`process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md`); `process/context/all-context.md`; `process/context/tests/all-tests.md`; `process/development-protocols/plan-lifecycle.md`; `implementation-standards.md`; plan de la Etapa B1 (formato); `app.py`; `opciones/__init__.py`; `tests/*`; scripts de investigación en el scratchpad `stageC/` (`chains.json`, `probe.py`, `dump.py`, `cmp.py`, solo referencia).
+4. **Supporting context files loaded:** SPEC de la Etapa C1 (`process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_SPEC_20-11-26.md`); `process/context/all-context.md`; `process/context/tests/all-tests.md`; `process/development-protocols/plan-lifecycle.md`; `implementation-standards.md`; plan de la Etapa B1 (formato); `app.py`; `opciones/__init__.py`; `tests/*`; scripts de investigación en el scratchpad `stageC/` (`chains.json`, `probe.py`, `dump.py`, `cmp.py`, solo referencia).
 5. **Next step for a fresh agent:** tras VALIDATE, ejecutar el bloque 1 (TDD: `tests/test_datos_types.py` en rojo → `requirements.txt` + `.gitignore` + instalación en `.venv` + `datos/types.py`, `errors.py`, `provider.py`), gate `.venv/bin/pytest tests/test_datos_types.py -q` y luego `.venv/bin/pytest -q`; no empezar un bloque con el anterior en rojo; marcar `CODE DONE`, nunca `VERIFIED` sin confirmación del usuario.
 
 **Instrucciones para el agente de EXECUTE (lecciones del MVP, A y B1, vinculantes):**
@@ -510,14 +510,14 @@ Accepted by: n/a (PASS; known gaps C-G5, C-G9, C-G10 recorded as residuals)
 ## Autonomous Goal Block
 
 SESSION GOAL: Etapa C1 — datos de mercado en directo (Yahoo, solo opciones líquidas, caché local) en Laboratorio de Opciones, bloques 1, 2, 3a-3d (3c caché, 3d servicio), 4, 5, 6, 7.
-Charter + umbrella plan: N/A — single plan (process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md; SPEC locked in the same folder).
+Charter + umbrella plan: N/A — single plan (process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md; SPEC locked in the same folder).
 Autonomy: per feedback_autonomous_phase_execution.md — no approval pauses between blocks; delegation to spawned agents stays mandatory (execute = opus, vc-tester EVL = sonnet); blocked network steps are reported, not retried.
 Hard stop conditions / safety constraints:
 - Never touch, restart or stop the user's Streamlit on port 8501; any manual server uses 8502+ and is stopped afterwards.
 - Do not modify `opciones/` (`git diff --stat -- opciones/` must stay empty); no writes under `process/` from EXECUTE.
 - No real network in the normal suite (only `LIVE_DATA=1`); never write to the real `.cache_datos/` from tests; never start a block on a red suite.
 - No commits, installs outside `.venv`, or account/financial actions without explicit user approval; block 1 `pip install` needs network approval (orchestrator may run it).
-Next phase: EXECUTE: process/general-plans/active/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md (block 1 first)
+Next phase: EXECUTE: process/general-plans/completed/etapa-c1-datos-directo_20-11-26/etapa-c1-datos-directo_PLAN_20-11-26.md (block 1 first)
 Validate contract: inline in the plan (`## Validate Contract`), Gate: PASS.
 Execute start: `.venv/bin/pytest tests/test_datos_types.py -q` then `.venv/bin/pytest -q` (2330 passed, 2 skipped baseline) | e2e: AppTest smoke `tests/test_app_smoke.py` | probe: manual checklist 1-10 on port 8502 | high-risk pack: no
 

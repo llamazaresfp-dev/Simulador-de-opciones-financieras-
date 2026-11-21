@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-20 (UPDATE PROCESS, Stage B1 closeout)
+Last updated: 2026-11-21 (UPDATE PROCESS, Stage C1 closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,12 +145,12 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-MVP (v1), Stage A (Monte Carlo + implied volatility) and Stage B1 (binomial American model) implemented. Layout:
+MVP (v1), Stage A (Monte Carlo + implied volatility), Stage B1 (binomial American model) and Stage C1 (live market data) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
-  requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest)
+  requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest, yfinance 1.8.0, pandas 3.1.1)
   app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes;
                           "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación";
                           Stage B1: Ajustes "Modelo de valoración" radio (binomial / Black-Scholes), premium-origin captions, active-model caption
@@ -172,7 +172,18 @@ laboratorio-opciones/
     implied_vol.py     -- implied_vol(leg, market) -> IVResult (brentq on Black-Scholes, or on crr_price for American Acción/ETF;
                           Spanish messages, never raises)
     simulation.py      -- exact_pop (lognormal closed form), SimulationSettings, simulate_scenario (Monte Carlo)
-  tests/               -- pytest suite (12 test files + __init__.py, 2330 passed + 2 skipped): test_pricing, test_legs_payoff,
+  datos/               -- Stage C1 live market data (top-level package, outside the engine; engine unchanged)
+    types.py           -- OptionQuote, MarketSnapshot (flag `complete`)
+    errors.py          -- DatosError hierarchy (NetworkError, RateLimitError, EmptyDataError) + Spanish MSG_* texts
+    provider.py        -- MarketDataProvider Protocol (swappable provider)
+    filters.py         -- LiquidityRules / DEFAULT_RULES (bid>0, ask>0, OI>=100, spread <=10% or <=0.10 when mid<1,
+                          +-20% of spot, 7-120 days), clean_row, dedupe, filter_chain (pure, never raise)
+    cache.py           -- .cache_datos/ (git-ignored), one JSON per label (SPX.json for ^SPX), schema_version, atomic write
+    fake.py            -- FakeProvider (injected today/offsets, fixture-backed; used by tests)
+    service.py         -- load_with_notices / load_or_cache, injected today/now, partial-failure policy
+    yahoo.py           -- YahooProvider; the ONLY module importing yfinance/pandas (params yf_module, session)
+    tickers.py         -- curated list: SPX->^SPX; SPY, QQQ, IWM; AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA; "Entrada manual"
+  tests/               -- pytest suite (21 test files + conftest.py + __init__.py, 2742 passed + 3 skipped; Stage C1 adds test_datos_types/filters/cache/service/yahoo/isolation/live/tickers/chain_picker, tests/fixtures/, extended app smoke): test_pricing, test_legs_payoff,
                           test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
                           test_implied_vol, test_simulation, test_binomial, test_binomial_iv, test_pricing_model, test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
@@ -209,15 +220,25 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Gotchas:** never export a function named `binomial` from `__init__.py` (it would shadow the submodule, same as `implied_vol`); Streamlit dev servers keep stale imported package modules, so restart the server after engine changes.
 - **Known gaps:** the tree clips an American put at K while the no-vol path uses K*exp(-rT) > K for r < 0 on deep-ITM long-T puts (exotic inputs; the tree value is the correct American bound); every spot/vol/days/strike edit is a cold ~0.8 s `analyze` for a 4-leg iron condor.
 
+## Stage C1 Behaviours Worth Knowing
+
+- **Flow:** sidebar Tipo -> Ticker -> "Cargar datos" -> Vencimiento -> real-leg picker. Premium = mid of the chain row; IV shown is computed by the engine; Yahoo IV is reference only. Age text shows how old the data is. Editing the strike of a market leg turns it manual. "Entrada manual" keeps the old manual flow.
+- **Liquidity filter (only liquid options shown):** rules live in one place (`LiquidityRules`, `DEFAULT_RULES`), comparisons use tolerance `EPS = 1e-9`. Raw-row contract: `kind, strike, bid, ask, oi` required; `last, volume, iv_yahoo` optional.
+- **Cache rule:** a complete load always writes `.cache_datos/<LABEL>.json`; a partial load writes only if not poorer (through today's window) than the cached one (`MarketSnapshot.complete` flag). Reads re-apply filters and recompute days from the injected clock. The first 429 (`RateLimitError`) stops further requests; >=1 chain + 429 -> partial snapshot + notice, 0 chains -> error.
+- **Manual live run (21-11-26):** SPY load used 25 HTTP requests; spot 689.81, r 0.04122, q 0.00791; 15 liquid expiries.
+- **Offline tests:** autouse network block in `tests/conftest.py`; opt-in live test with `LIVE_DATA=1`. Full text: `process/general-plans/completed/etapa-c1-datos-directo_20-11-26/`.
+- **Streamlit lessons:** AppTest re-invokes `format_func` outside the script run, so `format_func` must not read `session_state` or the clock (compute labels inside the script run); change widget state only in callbacks; restart the server after package changes.
+- **Known gaps:** Yahoo is unofficial/fragile (~15 min delay, 429 limits; mitigated by cache and messages); live test is opt-in only, so Yahoo format changes are not caught by the normal suite; on weekends/closed market SPX has all bids 0 -> no liquid options (by design, message shown).
+
 ## Technology Stack
 
 - **Language:** Python 3.12.3 (system interpreter, `/usr/bin/python3`)
 - **Numerics:** numpy (vectorised P&L over price grids), scipy (`scipy.stats.norm` for Black-Scholes)
 - **Charts:** plotly (interactive P&L curves)
 - **Web UI:** Streamlit (pure-Python web app, simple styling by design)
-- **Market data (v2, not MVP):** yfinance (free, ~15 min delayed; US stocks, ETFs and index options SPX/NDX/RUT)
+- **Market data (Stage C1):** yfinance 1.8.0 + pandas 3.1.1 (free, ~15 min delayed; stocks, ETFs and index options), used only inside `datos/yahoo.py`
 - **Tests:** pytest
-- **Environment:** local virtualenv `.venv/` (git-ignored), created 2026-11-20. Installed: numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0. Note: `pip install` needs network access outside the sandbox.
+- **Environment:** local virtualenv `.venv/` (git-ignored), created 2026-11-20. Installed: numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0, yfinance 1.8.0, pandas 3.1.1. Note: `pip install` needs network access outside the sandbox.
 - **Version control:** git, single local branch `main`, no remote.
 
 ## Key Patterns and Conventions
@@ -230,7 +251,7 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 
 **Commissions:** configurable, defaults USD 0.65 per contract, extra USD 0.60 per contract on index options, charged on open and close by default. Subtracted from P&L, so they move breakevens.
 
-**Layering:** `opciones/` is pure calculation (no Streamlit imports, no I/O); the Streamlit app only gathers inputs and draws. Keeps the engine testable.
+**Layering:** `opciones/` is pure calculation (no Streamlit imports, no I/O); all network/cache I/O lives in `datos/` (only `datos/yahoo.py` imports yfinance/pandas); the Streamlit app only gathers inputs and draws. Keeps the engine testable.
 
 **Naming / language:** identifiers (variables, functions, classes, modules' public API) in **English**; code comments and docstrings in **Spanish**. UI text in Spanish, keeping standard English option terms (call, put, strike, delta...).
 
@@ -240,9 +261,9 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 
 ## Environment and Configuration
 
-**Config files:** `requirements.txt` (pinned dependencies), `.gitignore`. No env vars, secrets or external services in the MVP.
+**Config files:** `requirements.txt` (pinned dependencies), `.gitignore` (includes `.cache_datos/`). No secrets. Env var `LIVE_DATA=1` enables the opt-in live test and lifts the test network block.
 
-**v2 (planned):** yfinance needs no API key. Index option data (SPX/NDX/RUT) may be incomplete on Yahoo; fallback to equivalent ETFs (SPY/QQQ/IWM).
+**Live data (C1):** yfinance needs no API key. Local cache in `.cache_datos/` (git-ignored). Index options (SPX as `^SPX`) may be empty/all-bid-0 when the market is closed; SPY/QQQ/IWM are the ETF equivalents.
 
 ## Source References
 
@@ -250,6 +271,7 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - `requirements.txt` -- pinned dependencies
 - `opciones/__init__.py` -- engine public API
 - `app.py` -- Streamlit UI
+- `datos/` -- live market data package (Stage C1)
 
 ## Open Questions / Outstanding Work
 
@@ -257,11 +279,12 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - Stage A (Monte Carlo + implied volatility) complete and verified (`process/general-plans/completed/etapa-a-montecarlo-iv_20-11-26/`; AC-A1..AC-A17 met, 910 tests).
 - Stage B1 (binomial American model) complete and verified (`process/general-plans/completed/etapa-b1-binomial_20-11-26/`; AC-B1..AC-B16 met, 2330 passed + 2 skipped; closeout WITH_GAPS, see Stage B1 known gaps).
 - Stage B2 (rational close fee at expiry) deferred by the user; backlog item stays: `process/general-plans/backlog/close-fee-rational-close_20-11-26.md` (accepted decisions: abandon if value <= fee, short legs unchanged, toggle in Ajustes default on).
-- Next: Stage C -- real/historical data (market data via yfinance etc., per `DISENO.md` roadmap) as a new plan.
+- Stage C1 (live market data) complete and verified (`process/general-plans/completed/etapa-c1-datos-directo_20-11-26/`; AC-C1-1..AC-C1-16 met, 2742 passed + 3 skipped; closeout COMPLETE_WITH_GAPS, 3 known gaps, see Stage C1 behaviours).
+- Next: Stage C2 -- historical underlying data + synthetic backtest/calibration page, as a new plan. Stage C3 (paid historical options) optional.
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20; refreshed at Stage B1 closeout (HEAD 0f28123)
+- Generated: 2026-11-20; refreshed at Stage C1 closeout (HEAD dcaec7e)
 - Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

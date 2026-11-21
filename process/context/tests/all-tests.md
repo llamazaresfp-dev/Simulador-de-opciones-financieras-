@@ -10,7 +10,7 @@ metadata:
 
 # laboratorio-opciones - All Tests
 
-Last updated: 2026-11-20 (UPDATE PROCESS, Stage B1 closeout)
+Last updated: 2026-11-21 (UPDATE PROCESS, Stage C1 closeout)
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
@@ -70,7 +70,7 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 - Manual (user) checklist still covers visuals and cross-tab persistence of the Ajustes values: `.venv/bin/streamlit run app.py`.
 - The engine import must not pull in Streamlit: checked in a fresh subprocess in `tests/test_analyze.py`.
 
-### Test files (2330 passed + 2 skipped at Stage B1 close)
+### Test files (2742 passed + 3 skipped at Stage C1 close)
 
 | File | Covers |
 |---|---|
@@ -86,13 +86,24 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 | `tests/test_binomial.py` | CRR pricer: Hull references (7.4284, 4.4885), European tree vs BS, scaled-tolerance test of the averaged European pricer, early-exercise premium, parity bounds, grid vs scalar, Greeks, edge cases, timing and cache-equality tests |
 | `tests/test_binomial_iv.py` | American IV round trip (price always; sigma only where vega > 0.01), identifiability/precision/vega-guard messages, Index/BS path equals Stage A IV, never raises, timing |
 | `tests/test_pricing_model.py` | dispatcher truth table, canary (default Market is binomial), Index identical under both selectors, expiry regression (P&L, metrics, exact PoP 0.5721, MC seed 42 identical), "hoy" curve bounds, position Greeks, timing |
-| `tests/test_app_smoke.py` | AppTest smoke of `app.py` (incl. Ajustes model radio, manual premium kept on toggle, reset-button labels, Index "no tiene efecto") |
+| `tests/test_app_smoke.py` | AppTest smoke of `app.py` (incl. Ajustes model radio, manual premium kept on toggle, reset-button labels, Index "no tiene efecto"; Stage C1: ticker cascade, real-leg picker, expiry-label regression) |
+| `tests/test_datos_types.py` | OptionQuote/MarketSnapshot, error hierarchy, Spanish MSG_*, Protocol, network-block test |
+| `tests/test_datos_filters.py` | liquidity rules with exact-border cases (EPS tolerance), dirty/duplicate rows, fixtures, thresholds in one place |
+| `tests/test_datos_cache.py` | atomic write/read in `tmp_path`, `SPX.json` naming, corrupt/schema mismatch, partial-vs-rich rule, `complete` flag |
+| `tests/test_datos_service.py` | FakeProvider service with injected clock: r/q conversion, window 7-120 borders, partial failures, first 429 stops requests, cache writes, `load_or_cache` |
+| `tests/test_datos_yahoo.py` | YahooProvider with injected fake `yf_module`/`session` (no network) |
+| `tests/test_datos_isolation.py` | only `datos/yahoo.py` imports yfinance/pandas; engine does not import `datos` |
+| `tests/test_datos_live.py` | opt-in live test against Yahoo (skipped unless `LIVE_DATA=1`) |
+| `tests/test_datos_tickers.py` | curated ticker list and `^SPX` mapping |
+| `tests/test_datos_chain_picker.py` | real-leg picker: premium = mid, manual on strike edit |
 
 Notes: `test_validation.py` also covers `validate_simulation` and `scenario_warnings`; `test_analyze.py` checks that `opciones.implied_vol` and `opciones.simulation` import without Streamlit. Monte Carlo tests use tolerances of 4 standard errors and fixed seeds (deterministic, not flaky). Per-file commands: `.venv/bin/pytest tests/test_implied_vol.py -q`, `.venv/bin/pytest tests/test_simulation.py -q`.
 
 **Pinning convention (Stage B1):** the default `Market.pricing_model` is `"binomial"`, so tests whose expected numbers assume Black-Scholes premiums for Acción/ETF pin their `Market` helpers with `pricing_model="black_scholes"` (test_pricing.py: one line in `make_market`; also test_legs_payoff, test_simulation, test_implied_vol, test_analyze, test_catalog, and the smoke test where concrete premiums are asserted). Never change an expected number to make a test pass; pin the helper instead. Also run the full suite when a cross-cutting default changes (the emulation during VALIDATE found 5 hidden failures).
 
 **Timing tests (AC-B13):** loose `time.perf_counter` bounds: premium < 0.25 s, 401-point grid < 1.0 s, American IV < 2.0 s, iron condor `analyze` cold < 2.0 s and warm < 0.3 s. Cached results must equal uncached within 1e-12 and never return a shared mutable array. 2 legitimate skips (put at intrinsic; IV undefined).
+
+**Offline rule and fixtures (Stage C1):** `tests/conftest.py` has an autouse fixture that blocks `socket.socket.connect` and `socket.getaddrinfo` (clear "red bloqueada en tests" error); `LIVE_DATA=1` lifts it and enables the live test. The suite also passes under `unshare -rn` (no network). Fixtures in `tests/fixtures/` re-recorded Saturday 21-11-26: real `aapl`, `spy`, `spx_weekend` (all bids 0); synthetic `spx`, `bid_zero`, `dirty`, `stale_last`, `edge_exact`. Date-dependent tests inject `today`/`now`; never read the real clock. `.cache_datos/` must not be created by tests (use `tmp_path`). 3 skips = 2 legitimate B1 skips + the opt-in live test.
 
 ## Default Verification Order
 
@@ -138,6 +149,6 @@ python3 -m venv .venv
 
 - Cross-tab persistence of the Ajustes values and visual layout have no automated test (AppTest cannot cover lazy tabs/visuals); verified manually by the user at MVP close.
 - Monte Carlo tests prove exactness against independent oracles, not that lognormal/Black-Scholes describe real markets (warnings only). Histogram clipping at percentiles 0.5-99.5 % is a presentation choice. No browser performance test (engine time only).
-- Market-data code (v2) will need mocked yfinance responses; not designed yet.
+- Stage C1: the live test is opt-in only (`LIVE_DATA=1`), so Yahoo format changes are not caught by the normal suite; weekend/closed market leaves SPX with all bids 0 (no liquid options, by design); Yahoo is unofficial, ~15 min delayed, 429 limits (mitigated by cache and messages). Streamlit lesson: AppTest re-invokes `format_func` outside the script run, so it must not read `session_state` or the clock.
 - Stage B1: the tree clips an American put at K while the no-vol path uses K*exp(-rT) > K for r < 0 on deep-ITM long-T puts (exotic inputs; no test asserts equality there); cold `analyze` of a 4-leg iron condor is ~0.8 s (only a regression bound, not a UX test). After engine changes restart any Streamlit dev server (stale imported modules) before manual checks.
-- Resolved: engine tests exist (2330 incl. Stage A and B1); UI smoke test exists (former gap G3).
+- Resolved: engine tests exist (2742 passed + 3 skipped incl. Stage A, B1 and C1); UI smoke test exists (former gap G3).

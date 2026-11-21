@@ -43,6 +43,10 @@ from datos.service import (
 )
 from datos.types import MarketSnapshot, OptionQuote
 
+# yahoo.py importa yfinance solo dentro del constructor de YahooProvider,
+# así que reexportarlo aquí no carga yfinance ni pandas.
+from datos.yahoo import YahooProvider
+
 __all__ = [
     "FakeProvider",
     "age_text",
@@ -74,4 +78,5 @@ __all__ = [
     "NetworkError",
     "OptionQuote",
     "RateLimitError",
+    "YahooProvider",
 ]

@@ -15,10 +15,26 @@ from datos.errors import (
     NetworkError,
     RateLimitError,
 )
+from datos.filters import (
+    DEFAULT_RULES,
+    EPS,
+    LiquidityRules,
+    clean_row,
+    dedupe,
+    filter_chain,
+    is_expiry_in_window,
+)
 from datos.provider import MarketDataProvider
 from datos.types import MarketSnapshot, OptionQuote
 
 __all__ = [
+    "DEFAULT_RULES",
+    "EPS",
+    "LiquidityRules",
+    "clean_row",
+    "dedupe",
+    "filter_chain",
+    "is_expiry_in_window",
     "DatosError",
     "EmptyDataError",
     "MSG_EMPTY",

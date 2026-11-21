@@ -95,6 +95,11 @@ def test_market_snapshot_keeps_fields():
     assert snapshot.loaded_at.tzinfo is not None
 
 
+def test_market_snapshot_complete_defaults_to_true():
+    assert make_snapshot().complete is True
+    assert make_snapshot(complete=False).complete is False
+
+
 def test_market_snapshot_is_frozen():
     snapshot = make_snapshot()
     with pytest.raises(dataclasses.FrozenInstanceError):

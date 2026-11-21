@@ -5,6 +5,12 @@ pandas ni streamlit: el único módulo que usará yfinance es el
 adaptador de Yahoo, y lo importará dentro de su constructor.
 """
 
+from datos.cache import (
+    is_richer_or_equal,
+    read_snapshot,
+    richness,
+    write_snapshot,
+)
 from datos.errors import (
     MSG_EMPTY,
     MSG_NETWORK,
@@ -28,6 +34,10 @@ from datos.provider import MarketDataProvider
 from datos.types import MarketSnapshot, OptionQuote
 
 __all__ = [
+    "is_richer_or_equal",
+    "read_snapshot",
+    "richness",
+    "write_snapshot",
     "DEFAULT_RULES",
     "EPS",
     "LiquidityRules",

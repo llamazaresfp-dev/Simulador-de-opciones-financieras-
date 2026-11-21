@@ -3,3 +3,5 @@ iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_statu
 1	2026-11-21	5	0	5	5	ACTIVE	CONTINUE	supplement applied C-V1..C-V5 (agent resumed after usage limit); re-run PVL from V1
 2	2026-11-21	4	0	1	4	ACTIVE	CONTINUE	re-validation CONDITIONAL (C-V6 block order, A1-A3); supplement 2 applied; re-run PVL from V1
 3	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation from V1: Gate PASS after 2 supplement cycles
+4	2026-11-21	1	1	0	1	ACTIVE	CONTINUE	EVL block 3c cycle 1: raw-count richness blocks complete fresh load after expiry rollover (AC-C1-10)
+5	2026-11-21	0	0	0	0	SATURATED	HALTED_SUCCESS	EVL block 3c re-run after fix: 239 targeted, 2569 full, complete/partial rule confirmed

@@ -48,6 +48,12 @@ class MarketSnapshot:
     - q_source: "yahoo", "indice" o "no_disponible".
     - chains: vencimiento ISO "YYYY-MM-DD" -> lista de cotizaciones líquidas.
     - source: "live" (recién descargado) o "cache" (leído del disco).
+    - complete: True si la carga trajo todo lo que se pidió. El servicio
+      (bloque 3d) lo pondrá a False cuando la carga quede a medias: se
+      corta por el límite de solicitudes (429) o se salta vencimientos
+      porque fallaron al descargarse. La caché usa este dato para decidir
+      si la carga puede sustituir a la copia guardada (ver
+      `datos.cache.write_snapshot`). Por defecto True.
     """
 
     ticker: str
@@ -58,3 +64,4 @@ class MarketSnapshot:
     q_source: str
     chains: dict[str, list[OptionQuote]]
     source: str
+    complete: bool = True

@@ -62,7 +62,7 @@ def scenarios_expander(at: AppTest):
 
 def test_app_loads_without_exception(app):
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes"]
+    assert [tab.label for tab in app.tabs] == ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes", "📈 Backtest"]
     # Con los datos por defecto hay una pata y se dibuja el gráfico de P&L
     # (más el histograma de escenarios, dentro de su desplegable: Etapa A).
     assert len(app.get("plotly_chart")) == 2

@@ -48,6 +48,7 @@ from opciones import (
 )
 from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES, PRICING_MODELS
 from opciones.validation import MSG_NOT_ADVICE
+from ui_backtest import clear_backtest_state, init_backtest_state, render_backtest
 
 # ============================================================================
 # MEJORAS UI - Paleta conservadora con sombras, padding y tipografía
@@ -143,7 +144,7 @@ def create_strategy_badge(market_view: str) -> str:
 
 # Etiquetas de las pestañas (con icono). El valor de st.session_state["main_tab"]
 # es la etiqueta completa de la pestaña activa.
-TAB_NAMES = ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes"]
+TAB_NAMES = ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes", "📈 Backtest"]
 
 UNDERLYINGS = ["Acción", "ETF", "Índice"]
 KIND_LABELS = {"call": "Call", "put": "Put", "stock": "Acción"}
@@ -216,6 +217,9 @@ def init_state() -> None:
     st.session_state.setdefault("pricing_model", PRICING_BINOMIAL)
 
     st.session_state.setdefault("main_tab", TAB_NAMES[0])
+
+    # Pestaña Backtest (Etapa C2): sus controles, histórico y resultado.
+    init_backtest_state()
 
     # Datos de mercado en directo (Etapa C1). Con "Entrada manual" nada de
     # esto se usa y la app funciona exactamente como antes.
@@ -499,15 +503,17 @@ def on_underlying_change() -> None:
     """Cambia el tipo de subyacente: el ticker vuelve a "Entrada manual"."""
     st.session_state["ticker_choice"] = MANUAL_ENTRY
     clear_loaded_data()
+    clear_backtest_state()
 
 
 def on_ticker_change() -> None:
     """Cambia el ticker (p. ej. SPY -> QQQ): los datos del anterior ya no valen.
 
     Así nunca se muestra la cadena de SPY con la etiqueta QQQ: hay que
-    volver a pulsar "Cargar datos".
+    volver a pulsar "Cargar datos". Lo mismo con el histórico del Backtest.
     """
     clear_loaded_data()
+    clear_backtest_state()
 
 
 def current_time() -> datetime:
@@ -1547,13 +1553,27 @@ def main() -> None:
     # Con key + on_change="rerun", la pestaña activa vive en
     # st.session_state["main_tab"] (su etiqueta, con icono: ver TAB_NAMES)
     # y un callback puede cambiarla.
-    catalog_tab, builder_tab, settings_tab = st.tabs(TAB_NAMES, key="main_tab", on_change="rerun")
+    catalog_tab, builder_tab, settings_tab, backtest_tab = st.tabs(
+        TAB_NAMES, key="main_tab", on_change="rerun"
+    )
     with catalog_tab:
         render_catalog(market_errors)
     with builder_tab:
         render_builder(market, market_errors)
     with settings_tab:
         render_settings()
+    with backtest_tab:
+        # Se pasa la FUNCIÓN data_provider (sin llamarla): el proveedor solo
+        # se crea al pulsar "Cargar histórico".
+        render_backtest(
+            data_provider,
+            current_time(),
+            settings_from_state(),
+            st.session_state["underlying"],
+            st.session_state["ticker_choice"],
+            percent_to_fraction(st.session_state["rate_pct"]) or 0.0,
+            st.session_state.get("cache_dir"),
+        )
 
 
 main()

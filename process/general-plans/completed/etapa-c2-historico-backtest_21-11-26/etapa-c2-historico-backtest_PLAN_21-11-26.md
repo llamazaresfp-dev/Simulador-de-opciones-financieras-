@@ -2,17 +2,17 @@
 name: etapa-c2-historico-backtest PLAN
 description: "Plan COMPLEX de la Etapa C2 (histórico diario del subyacente + pestaña Backtest de calibración de la PoP y diagnóstico de colas) de Laboratorio de Opciones, en 10 bloques secuenciales cada uno cerrado con pytest verde."
 date: 21-11-26
-status: planned
+status: completed
 complexity: complex
-spec: process/general-plans/active/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_SPEC_21-11-26.md
+spec: process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_SPEC_21-11-26.md
 ---
 
 # Plan: Etapa C2 — Histórico del subyacente y calibración de la PoP (pestaña Backtest)
 
 **Date**: 21-11-26
 **Complexity**: COMPLEX (un solo plan, un solo flujo de ejecución, 10 bloques con dependencias; no es phase program)
-**Status**: ⏳ PLANNED (PLAN escrito 21-11-26; ningún bloque ejecutado)
-**SPEC bloqueado**: `process/general-plans/active/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_SPEC_21-11-26.md` (AC-C2-1..AC-C2-17, decisiones C2-1..C2-8, valores propuestos 1–12 aprobados por el usuario, huecos C2-G1..C2-G9)
+**Status**: ✅ COMPLETED (22-11-26; bloques 1-10 verificados, EVL en verde, informe de cierre en la carpeta)
+**SPEC bloqueado**: `process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_SPEC_21-11-26.md` (AC-C2-1..AC-C2-17, decisiones C2-1..C2-8, valores propuestos 1–12 aprobados por el usuario, huecos C2-G1..C2-G9)
 **Entorno**: Python 3.12.3, `.venv` (numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0, yfinance 1.8.0, pandas 3.1.1); línea base: `.venv/bin/pytest -q` → **2742 passed, 3 skipped** (HEAD 14858a2, rama main)
 
 **TL;DR:** dos módulos puros nuevos en el motor (`opciones/calibration.py` y `opciones/backtest.py`, sin pandas ni E/S; los módulos existentes de `opciones/` no cambian) recorren fechas pasadas t, calculan con datos ≤ t la PoP exacta (Black-Scholes) de una plantilla y miran si ganó en t+H; de ahí salen el gráfico de fiabilidad, Brier, N y N efectivo y el diagnóstico de colas. El histórico llega por una interfaz **separada** (`HistoryProvider`) con caché propia `.cache_datos/history/`, un servicio de limpieza/carga y un método nuevo en `YahooProvider`/`FakeProvider`. La interfaz es una 4.ª pestaña "Backtest" (`ui_backtest.py`) donde nada pesado corre sin pulsar "Cargar histórico" / "Calcular". La suite sigue sin red; cada bloque cierra con `.venv/bin/pytest -q` completo en verde.
@@ -447,7 +447,7 @@ Replay de la estrategia / P&L histórico y cualquier afirmación de rentabilidad
 
 ## Resume and Execution Handoff
 
-1. **Plan file:** `process/general-plans/active/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_PLAN_21-11-26.md` (execute-anchor).
+1. **Plan file:** `process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/etapa-c2-historico-backtest_PLAN_21-11-26.md` (execute-anchor).
 2. **Last completed phase/step:** PLAN escrito (21-11-26); ningún bloque ejecutado (0/10 bloques + cierre); SPEC bloqueado y decisiones de INNOVATE concretadas arriba (PD-1..PD-14, IP-1..IP-11). Cambio del usuario 21-11-26: desviación (i) rechazada y sustituida por descarga `años + 1` con caché que reutiliza solo si cubre el tramo (PD-14, IP-10, IP-11).
 3. **Validate-contract status:** PASS (re-validación ciclo 3, 21-11-26; suplemento S-1..S-3 aplicado y verificado: W acotado a 10–250, `HistoryLoad.requested_start: date | None`); listo para EXECUTE. E-7 y E-8 siguen accesibles desde el contrato.
 4. **Supporting context files loaded:** SPEC de C2; plan de C1 (plantilla estructural); `process/context/all-context.md`; `process/context/tests/all-tests.md`; `opciones/{simulation,catalog,payoff,models,metrics,validation,__init__}.py`; `datos/*.py`; `app.py`; `tests/conftest.py`, `tests/test_app_smoke.py` (`data_app`), `tests/test_datos_isolation.py`, `tests/test_datos_live.py`.

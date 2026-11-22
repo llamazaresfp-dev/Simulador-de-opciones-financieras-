@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-21 (UPDATE PROCESS, Stage C1 closeout)
+Last updated: 2026-11-22 (UPDATE PROCESS, Stage C2 closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,13 +145,15 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-MVP (v1), Stage A (Monte Carlo + implied volatility), Stage B1 (binomial American model) and Stage C1 (live market data) implemented. Layout:
+MVP (v1), Stage A (Monte Carlo + implied volatility), Stage B1 (binomial American model), Stage C1 (live market data) and Stage C2 (historical data + PoP calibration backtest) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
   requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest, yfinance 1.8.0, pandas 3.1.1)
-  app.py               -- Streamlit web app (UI only, calls opciones/); tabs Catálogo / Constructor / Ajustes;
+  app.py               -- Streamlit web app (UI only, calls opciones/); 4 tabs: 📊 Catálogo / 🛠️ Constructor / ⚙️ Ajustes / 📈 Backtest (Stage C2);
+                          user's visual redesign (22-11-26): emoji tab labels, catalog cards with coloured badges, ➕/➖/🔄 icons,
+                          subheaders with divider, COLOR_SYSTEM/COLOR_STRATEGY/ICON_* constants (legs stay dicts, not Leg objects);
                           "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación";
                           Stage B1: Ajustes "Modelo de valoración" radio (binomial / Black-Scholes), premium-origin captions, active-model caption
   opciones/            -- calculation engine (pure Python, no Streamlit imports, no I/O)
@@ -172,18 +174,28 @@ laboratorio-opciones/
     implied_vol.py     -- implied_vol(leg, market) -> IVResult (brentq on Black-Scholes, or on crr_price for American Acción/ETF;
                           Spanish messages, never raises)
     simulation.py      -- exact_pop (lognormal closed form), SimulationSettings, simulate_scenario (Monte Carlo)
+    calibration.py     -- Stage C2: pure numpy; decile binning, Wilson intervals, Brier, kurtosis/tails histogram helpers
+    backtest.py        -- Stage C2: pure numpy, helpers on integer day numbers (first_analyzed_index -> (index, years_available, warning),
+                          expiry_index -> None if no session in (t, t+H]) and run_backtest(template object, ...); forces Black-Scholes
+  ui_backtest.py       -- Stage C2 Backtest tab (root, Streamlit): controls, "Cargar histórico", "Calcular", reliability chart, table, tails;
+                          init_backtest_state(), build_tails_figure(z); no I/O or compute without button clicks
   datos/               -- Stage C1 live market data (top-level package, outside the engine; engine unchanged)
-    types.py           -- OptionQuote, MarketSnapshot (flag `complete`)
+    types.py           -- OptionQuote, MarketSnapshot (flag `complete`); C2: PriceHistory, HistoryProvider Protocol (separate from MarketDataProvider)
     errors.py          -- DatosError hierarchy (NetworkError, RateLimitError, EmptyDataError) + Spanish MSG_* texts
     provider.py        -- MarketDataProvider Protocol (swappable provider)
     filters.py         -- LiquidityRules / DEFAULT_RULES (bid>0, ask>0, OI>=100, spread <=10% or <=0.10 when mid<1,
                           +-20% of spot, 7-120 days), clean_row, dedupe, filter_chain (pure, never raise)
     cache.py           -- .cache_datos/ (git-ignored), one JSON per label (SPX.json for ^SPX), schema_version, atomic write
-    fake.py            -- FakeProvider (injected today/offsets, fixture-backed; used by tests)
+    fake.py            -- FakeProvider (injected today/offsets, fixture-backed; used by tests); C2 params sigma/mu/seed/dividends/
+                          irx_percent_series/history_empty_symbols/history_fail_symbols/history_years + history_calls
     service.py         -- load_with_notices / load_or_cache, injected today/now, partial-failure policy
-    yahoo.py           -- YahooProvider; the ONLY module importing yfinance/pandas (params yf_module, session)
+    yahoo.py           -- YahooProvider; the ONLY module importing yfinance/pandas (params yf_module, session); C2 adds get_history
+                          (SPX tries ^GSPC, ^SPX only on empty; ^IRX failure non-fatal)
+    history_cache.py   -- Stage C2: .cache_datos/history/ (one file per ticker, own schema_version, atomic write, coverage-checked reuse)
+    history_service.py -- Stage C2: clean_history (drops today's row, NaN, negatives, duplicates; dividends dated today or later), load with
+                          years+1 warm-up, cache fallback offline, provider passed as a callable
     tickers.py         -- curated list: SPX->^SPX; SPY, QQQ, IWM; AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA; "Entrada manual"
-  tests/               -- pytest suite (21 test files + conftest.py + __init__.py, 2742 passed + 3 skipped; Stage C1 adds test_datos_types/filters/cache/service/yahoo/isolation/live/tickers/chain_picker, tests/fixtures/, extended app smoke): test_pricing, test_legs_payoff,
+  tests/               -- pytest suite (34 modules incl. conftest.py, __init__.py, synthetic.py; 3029 passed + 4 skipped; Stage C2 adds test_calibration, test_backtest_helpers, test_backtest, synthetic.py, test_datos_history_types/cache/service, test_datos_yahoo_history, test_app_backtest; Stage C1 adds test_datos_types/filters/cache/service/yahoo/isolation/live/tickers/chain_picker, tests/fixtures/, extended app smoke): test_pricing, test_legs_payoff,
                           test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
                           test_implied_vol, test_simulation, test_binomial, test_binomial_iv, test_pricing_model, test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
@@ -230,6 +242,17 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Streamlit lessons:** AppTest re-invokes `format_func` outside the script run, so `format_func` must not read `session_state` or the clock (compute labels inside the script run); change widget state only in callbacks; restart the server after package changes.
 - **Known gaps:** Yahoo is unofficial/fragile (~15 min delay, 429 limits; mitigated by cache and messages); live test is opt-in only, so Yahoo format changes are not caught by the normal suite; on weekends/closed market SPX has all bids 0 -> no liquid options (by design, message shown).
 
+## Stage C2 Behaviours Worth Knowing
+
+- **What it is:** a calibration study of the app's PoP, not real profitability (no historical option prices). For past dates t the backtest computes the exact Black-Scholes PoP of a template using only data <= t, then checks whether it won at t+H (last session on or before t+H calendar days, unadjusted close). Output: reliability chart (deciles, Wilson bars), per-bin table, Brier, N and effective N (~years analysed / H, windows overlap so it is an approximation), tails histogram, optional second line with historical mu (1-year window, data <= t).
+- **Inputs per date:** realised vol = stdev of daily log returns of adjusted close over W sessions x sqrt(252) (W bound 10..250); r from ^IRX (percent -> fraction, non-fatal fallback to sidebar r with a notice); q = dividends of the previous 12 months / price (0 for the index). Dates failing market validation are skipped and counted; tail dates without expiry and early dates without a window are skipped.
+- **Data flow:** "Cargar histórico" downloads the chosen years + 1 warm-up year (user change 21-11-26; fixed 16-year download rejected); cache reuse only if the cached file covers the request and is <= 1 market day old; offline falls back to the cache with its age; today's row is always dropped. Short history -> notice with real years. Cache in `.cache_datos/history/`.
+- **State:** backtest state is cleared in `on_ticker_change`/`on_underlying_change`, NOT in `clear_loaded_data` (C1 "Cargar datos" also calls it). Result reused if parameters unchanged. Nothing heavy runs on opening the tab.
+- **Oracles (40 synthetic years, iron condor, H=30, W=30, step 10):** GBM |mean PoP - observed| 0.008/0.028 (tol 0.05); regimes max decile dev (n>=100) 0.083/0.110 (<=0.15), skill 0.060/0.061 (>=0.03), |Brier - sum p(1-p)/N| 0.007/0.017 (<=0.04); jumps kurtosis 4.79, max dev 0.447. Timing: 499 dates 0.74 s BS, 1.33 s with mu line.
+- **Visual redesign by the user (a29af3e):** its half-done dict->Leg refactor broke 48 tests; fixed by restoring dict legs, reverting engine `models.py`, restoring the breakevens line and reset button, dark-mode-safe colours, 6 label-only test edits. User's original kept at `~/proyectos-claude/backup-app-usuario-22-11-26/`.
+- **Lessons:** AppTest runs every tab body, so tabs must do no I/O or compute without clicks; pass the provider as a callable (`data_provider()` builds YahooProvider and swallows exceptions; use a recording spy in tests); `.cache_datos` is git-ignored, so detect test leaks with a sha256 of `find .cache_datos -type f -printf '%p %s %T@\n' | sort` and re-baseline per session (the user's Streamlit servers write there); AI-assisted UI edits can silently refactor state, so run the full suite after visual changes.
+- **Known gaps:** live Yahoo history (^GSPC/^SPX, ^IRX, max history) only checked by the user's manual run (opt-in live test not in suite); no historical implied vol (realised vol proxy mixes model error and volatility risk premium; VIX comparison deferred); overlapping windows make effective N approximate, and weekday-only `is_fresh` may refetch once after a market holiday. Full text: `process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/`.
+
 ## Technology Stack
 
 - **Language:** Python 3.12.3 (system interpreter, `/usr/bin/python3`)
@@ -271,7 +294,8 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - `requirements.txt` -- pinned dependencies
 - `opciones/__init__.py` -- engine public API
 - `app.py` -- Streamlit UI
-- `datos/` -- live market data package (Stage C1)
+- `datos/` -- live market data package (Stage C1) and historical data (Stage C2)
+- `ui_backtest.py` -- Backtest tab (Stage C2)
 
 ## Open Questions / Outstanding Work
 
@@ -280,11 +304,12 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - Stage B1 (binomial American model) complete and verified (`process/general-plans/completed/etapa-b1-binomial_20-11-26/`; AC-B1..AC-B16 met, 2330 passed + 2 skipped; closeout WITH_GAPS, see Stage B1 known gaps).
 - Stage B2 (rational close fee at expiry) deferred by the user; backlog item stays: `process/general-plans/backlog/close-fee-rational-close_20-11-26.md` (accepted decisions: abandon if value <= fee, short legs unchanged, toggle in Ajustes default on).
 - Stage C1 (live market data) complete and verified (`process/general-plans/completed/etapa-c1-datos-directo_20-11-26/`; AC-C1-1..AC-C1-16 met, 2742 passed + 3 skipped; closeout COMPLETE_WITH_GAPS, 3 known gaps, see Stage C1 behaviours).
-- Next: Stage C2 -- historical underlying data + synthetic backtest/calibration page, as a new plan. Stage C3 (paid historical options) optional.
+- Stage C2 (historical underlying data + PoP calibration backtest) complete and verified (`process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/`; AC-C2-1..AC-C2-17 met, 3029 passed + 4 skipped; closeout COMPLETE_WITH_GAPS, 3 known gaps; user manual checklist of 8 items OK 22-11-26).
+- Next: Stage B2 (rational close fee, backlog) and optional Stage C3 (paid historical options); possible future work: VIX comparison, strategy replay.
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20; refreshed at Stage C1 closeout (HEAD dcaec7e)
+- Generated: 2026-11-20; refreshed at Stage C2 closeout (Repo HEAD 4a21c2c at scan time, commit of closeout follows)
 - Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

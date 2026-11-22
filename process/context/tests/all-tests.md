@@ -10,7 +10,7 @@ metadata:
 
 # laboratorio-opciones - All Tests
 
-Last updated: 2026-11-21 (UPDATE PROCESS, Stage C1 closeout)
+Last updated: 2026-11-22 (UPDATE PROCESS, Stage C2 closeout)
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
@@ -70,7 +70,7 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 - Manual (user) checklist still covers visuals and cross-tab persistence of the Ajustes values: `.venv/bin/streamlit run app.py`.
 - The engine import must not pull in Streamlit: checked in a fresh subprocess in `tests/test_analyze.py`.
 
-### Test files (2742 passed + 3 skipped at Stage C1 close)
+### Test files (3029 passed + 4 skipped at Stage C2 close)
 
 | File | Covers |
 |---|---|
@@ -93,9 +93,18 @@ No deeper test docs yet; the per-file table below is the map. Add routing entrie
 | `tests/test_datos_service.py` | FakeProvider service with injected clock: r/q conversion, window 7-120 borders, partial failures, first 429 stops requests, cache writes, `load_or_cache` |
 | `tests/test_datos_yahoo.py` | YahooProvider with injected fake `yf_module`/`session` (no network) |
 | `tests/test_datos_isolation.py` | only `datos/yahoo.py` imports yfinance/pandas; engine does not import `datos` |
-| `tests/test_datos_live.py` | opt-in live test against Yahoo (skipped unless `LIVE_DATA=1`) |
+| `tests/test_datos_live.py` | opt-in live tests against Yahoo, chains and C2 history (skipped unless `LIVE_DATA=1`) |
 | `tests/test_datos_tickers.py` | curated ticker list and `^SPX` mapping |
 | `tests/test_datos_chain_picker.py` | real-leg picker: premium = mid, manual on strike edit |
+| `tests/test_calibration.py` | Stage C2: decile binning, Wilson intervals, Brier, kurtosis, tails helpers |
+| `tests/test_backtest_helpers.py` | Stage C2: integer-day helpers (`first_analyzed_index`, `expiry_index`, vol/r/q at t using only data <= t) |
+| `tests/test_backtest.py` | Stage C2: `run_backtest` with synthetic oracles (GBM, regimes, jumps), no-lookahead, skips counted, timing |
+| `tests/synthetic.py` | Stage C2 helper (not a test file): deterministic GBM / regime / jump series generators |
+| `tests/test_datos_history_types.py` | PriceHistory, HistoryProvider Protocol, error messages |
+| `tests/test_datos_history_cache.py` | `.cache_datos/history/` in `tmp_path`: atomic write, schema, coverage-checked reuse, age |
+| `tests/test_datos_history_service.py` | `clean_history` (today row, NaN, negatives, duplicates, dividends), years+1 warm-up, offline cache fallback, FakeProvider knobs and `history_calls` spy |
+| `tests/test_datos_yahoo_history.py` | `YahooProvider.get_history` with injected fake `yf_module` (^GSPC then ^SPX on empty, ^IRX non-fatal) |
+| `tests/test_app_backtest.py` | AppTest of the Backtest tab: nothing heavy on open, Cargar histórico / Calcular, state cleared on ticker/underlying change |
 
 Notes: `test_validation.py` also covers `validate_simulation` and `scenario_warnings`; `test_analyze.py` checks that `opciones.implied_vol` and `opciones.simulation` import without Streamlit. Monte Carlo tests use tolerances of 4 standard errors and fixed seeds (deterministic, not flaky). Per-file commands: `.venv/bin/pytest tests/test_implied_vol.py -q`, `.venv/bin/pytest tests/test_simulation.py -q`.
 
@@ -103,7 +112,9 @@ Notes: `test_validation.py` also covers `validate_simulation` and `scenario_warn
 
 **Timing tests (AC-B13):** loose `time.perf_counter` bounds: premium < 0.25 s, 401-point grid < 1.0 s, American IV < 2.0 s, iron condor `analyze` cold < 2.0 s and warm < 0.3 s. Cached results must equal uncached within 1e-12 and never return a shared mutable array. 2 legitimate skips (put at intrinsic; IV undefined).
 
-**Offline rule and fixtures (Stage C1):** `tests/conftest.py` has an autouse fixture that blocks `socket.socket.connect` and `socket.getaddrinfo` (clear "red bloqueada en tests" error); `LIVE_DATA=1` lifts it and enables the live test. The suite also passes under `unshare -rn` (no network). Fixtures in `tests/fixtures/` re-recorded Saturday 21-11-26: real `aapl`, `spy`, `spx_weekend` (all bids 0); synthetic `spx`, `bid_zero`, `dirty`, `stale_last`, `edge_exact`. Date-dependent tests inject `today`/`now`; never read the real clock. `.cache_datos/` must not be created by tests (use `tmp_path`). 3 skips = 2 legitimate B1 skips + the opt-in live test.
+**Offline rule and fixtures (Stage C1):** `tests/conftest.py` has an autouse fixture that blocks `socket.socket.connect` and `socket.getaddrinfo` (clear "red bloqueada en tests" error); `LIVE_DATA=1` lifts it and enables the live test. The suite also passes under `unshare -rn` (no network). Fixtures in `tests/fixtures/` re-recorded Saturday 21-11-26: real `aapl`, `spy`, `spx_weekend` (all bids 0); synthetic `spx`, `bid_zero`, `dirty`, `stale_last`, `edge_exact`. Date-dependent tests inject `today`/`now`; never read the real clock. `.cache_datos/` must not be created by tests (use `tmp_path`). 4 skips = 2 legitimate B1 skips (binomial IV) + 2 opt-in live tests (C1 chain, C2 history).
+
+**Stage C2 test rules:** oracle tolerances (40 synthetic years, iron condor, H=30, W=30, step 10): GBM |mean PoP - observed| <= 0.05 (measured 0.008/0.028); regimes max decile dev (n>=100) <= 0.15 (0.083/0.110), skill >= 0.03 (0.060/0.061), |Brier - sum p(1-p)/N| <= 0.04 (0.007/0.017); jumps show excess kurtosis (4.79) and max dev 0.447. Providers are passed as callables: use a recording spy (`history_calls`), because `data_provider()` swallows exceptions. AppTest runs every tab body, so the Backtest tab must do no I/O or compute without clicks. Cache leak check (`.cache_datos` is git-ignored): `find .cache_datos -type f -printf '%p %s %T@\n' | sort | sha256sum` before and after the suite must match, and `.cache_datos/history` must not appear; re-baseline per session because the user's Streamlit servers write there. Also run the suite under `unshare -rn` (no network). After visual app.py edits always run the full suite (a user redesign once broke 48 tests silently).
 
 ## Default Verification Order
 
@@ -151,4 +162,5 @@ python3 -m venv .venv
 - Monte Carlo tests prove exactness against independent oracles, not that lognormal/Black-Scholes describe real markets (warnings only). Histogram clipping at percentiles 0.5-99.5 % is a presentation choice. No browser performance test (engine time only).
 - Stage C1: the live test is opt-in only (`LIVE_DATA=1`), so Yahoo format changes are not caught by the normal suite; weekend/closed market leaves SPX with all bids 0 (no liquid options, by design); Yahoo is unofficial, ~15 min delayed, 429 limits (mitigated by cache and messages). Streamlit lesson: AppTest re-invokes `format_func` outside the script run, so it must not read `session_state` or the clock.
 - Stage B1: the tree clips an American put at K while the no-vol path uses K*exp(-rT) > K for r < 0 on deep-ITM long-T puts (exotic inputs; no test asserts equality there); cold `analyze` of a 4-leg iron condor is ~0.8 s (only a regression bound, not a UX test). After engine changes restart any Streamlit dev server (stale imported modules) before manual checks.
-- Resolved: engine tests exist (2742 passed + 3 skipped incl. Stage A, B1 and C1); UI smoke test exists (former gap G3).
+- Stage C2: live Yahoo history (^GSPC/^SPX, ^IRX, max history) is only checked by the user's manual run (opt-in live test not in the suite); no historical implied vol, so the calibration tests prove the machinery on synthetic data, not model fit on real markets; effective N is approximate (overlapping windows); weekday-only `is_fresh` may refetch once after a market holiday.
+- Resolved: engine tests exist (3029 passed + 4 skipped incl. Stage A, B1, C1 and C2); UI smoke test exists (former gap G3).

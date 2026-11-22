@@ -49,7 +49,101 @@ from opciones import (
 from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES, PRICING_MODELS
 from opciones.validation import MSG_NOT_ADVICE
 
-TAB_NAMES = ["Catálogo", "Constructor", "Ajustes"]
+# ============================================================================
+# MEJORAS UI - Paleta conservadora con sombras, padding y tipografía
+# ============================================================================
+
+# Colores base (sistema de diseño consistente)
+COLOR_SYSTEM = {
+    "primary": "#3b82f6",       # Azul principal para acciones principales
+    "primary_hover": "#2563eb", # Azul más oscuro para hover
+    "secondary": "#64748b",     # Gris azulado para elementos secundarios
+    "success": "#10b981",       # Verde éxito
+    "warning": "#f59e0b",       # Amarillo advertencia
+    "danger": "#ef4444",        # Rojo error/negativo
+    "info": "#3b82f6",          # Azul información
+    # Fondo de las secciones: gris azulado semitransparente, para que el
+    # texto se lea tanto con el tema claro como con el oscuro de Streamlit
+    # (un fondo blanco fijo dejaría el texto claro del tema oscuro ilegible).
+    "background_light": "rgba(148, 163, 184, 0.12)",
+    "border_subtle": "rgba(148, 163, 184, 0.35)",  # Borde sutil (sirve en ambos temas)
+    "shadow_light": "0 1px 3px rgba(0,0,0,0.06)",  # Sombra muy suave para cards
+    "shadow_medium": "0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)",  # Sombra media
+}
+
+# Colores por tipo de estrategia para badges
+COLOR_STRATEGY = {
+    "alcista": "#10b981",  # Verde para estrategias alcistas 📈
+    "bajista": "#f59e0b",  # Amarillo/ámbar para bajistas 📉
+    "neutral": "#6366f1",  # Índigo para neutrales ↔️
+    "volatil": "#ec4899",  # Rosa para volátiles 🎢
+}
+
+# Iconos para widgets y acciones - usando emojis Unicode (compatible con todos los navegadores)
+ICON_WIDGETS = {
+    "add": "➕",
+    "remove": "➖",
+    "refresh": "🔄",
+    "lock": "🔒",
+    "unlock": "🔓",
+    "check": "✓",
+    "info": "ℹ️",
+    "warning": "⚠️",
+    "error": "❌",
+}
+
+# Iconos de estrategias - usando emojis Unicode (compatible con todos los navegadores)
+ICON_STRATEGY = {
+    "alcista": "📈",  # Subida alcista
+    "bajista": "📉",  # Bajada bajista
+    "neutral": "↔️",  # Movimiento lateral
+    "volatil": "🎢",  # Volatilidad alta
+}
+
+
+def strategy_type(market_view: str) -> str:
+    """Tipo de estrategia ("alcista", "bajista", "neutral" o "volatil") según su visión de mercado."""
+    view = market_view.lower()
+    if any(word in view for word in ["alcista", "suba", "crezca"]):
+        return "alcista"
+    if any(word in view for word in ["bajista", "baja", "caída"]):
+        return "bajista"
+    if any(word in view for word in ["neutral", "lateral", "rango"]):
+        return "neutral"
+    return "volatil"  # volátil, gran movimiento, etc.
+
+
+def get_strategy_color(market_view: str) -> str:
+    """Devuelve el color del badge según la visión de mercado."""
+    return COLOR_STRATEGY[strategy_type(market_view)]
+
+
+def get_strategy_icon(market_view: str) -> str:
+    """Devuelve el icono emoji según la visión de mercado."""
+    return ICON_STRATEGY[strategy_type(market_view)]
+
+
+def create_strategy_badge(market_view: str) -> str:
+    """Crea HTML para un badge de estrategia con color, icono emoji y estilo mejorado."""
+    color = get_strategy_color(market_view)
+    icon = get_strategy_icon(market_view)
+    # Badge con emoji Unicode y texto completo. El color + "15"/"26" añade
+    # transparencia (hex de 8 dígitos), así el fondo se ve bien en ambos temas.
+    return f"""<span style="background-color: {color}15;
+         border: 1px solid {color}26;
+         padding: 4px 12px;
+         border-radius: 9999px;
+         font-size: 0.8rem;
+         margin-top: 0.2rem;
+         display: inline-block;
+         width: fit-content;">
+        {icon} {market_view}
+    </span>"""
+
+
+# Etiquetas de las pestañas (con icono). El valor de st.session_state["main_tab"]
+# es la etiqueta completa de la pestaña activa.
+TAB_NAMES = ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes"]
 
 UNDERLYINGS = ["Acción", "ETF", "Índice"]
 KIND_LABELS = {"call": "Call", "put": "Put", "stock": "Acción"}
@@ -121,7 +215,7 @@ def init_state() -> None:
     # market_from_state() la lee para construir el Market.
     st.session_state.setdefault("pricing_model", PRICING_BINOMIAL)
 
-    st.session_state.setdefault("main_tab", "Catálogo")
+    st.session_state.setdefault("main_tab", TAB_NAMES[0])
 
     # Datos de mercado en directo (Etapa C1). Con "Entrada manual" nada de
     # esto se usa y la app funciona exactamente como antes.
@@ -291,14 +385,14 @@ def refresh_auto_prices(market: Market) -> None:
 
 
 def add_leg() -> None:
-    """Botón "+ añadir pata": una call comprada con strike = spot."""
+    """Botón "➕ Añadir pata": una call comprada con strike = spot."""
     spot = st.session_state.get("spot") or MARKET_DEFAULTS["spot"]
     leg = new_leg_dict("call", 1, 1, spot, 0.0)
     st.session_state["legs"].append(leg)
 
 
 def remove_leg(leg_id: int) -> None:
-    """Botón "Quitar" de una fila."""
+    """Botón "➖ Quitar" de una fila."""
     st.session_state["legs"] = [leg for leg in st.session_state["legs"] if leg["id"] != leg_id]
 
 
@@ -342,7 +436,7 @@ def on_premium_change(leg_id: int) -> None:
 
 
 def reset_premium(leg_id: int) -> None:
-    """Botón "↺ binomial" / "↺ BS" / "↺ spot": la prima vuelve a ser automática."""
+    """Botón "🔄 binomial" / "🔄 BS" / "🔄 spot": la prima vuelve a ser automática."""
     leg = find_leg(leg_id)
     if leg is not None:
         leg["premium_manual"] = False
@@ -358,7 +452,7 @@ def open_template(template_key: str) -> None:
         legs.append(new_leg_dict(leg.kind, leg.side, leg.quantity, leg.strike, leg.price))
     st.session_state["legs"] = legs
     # Cambiar el valor de la clave de las pestañas selecciona otra pestaña.
-    st.session_state["main_tab"] = "Constructor"
+    st.session_state["main_tab"] = TAB_NAMES[1]
 
 
 def use_iv_as_global(vol_pct: float) -> None:
@@ -691,23 +785,102 @@ def render_catalog(market_errors: list[str]) -> None:
 
 
 def render_template_card(template, disabled: bool) -> None:
-    """Tarjeta de una plantilla: nombre, idea principal, detalles y botón."""
+    """Tarjeta de una plantilla: icono + nombre, badge, idea principal, botón y detalles.
+
+    Layout:
+    ┌────────────────────────────────────┐
+    │  Icono + Nombre                    │
+    │  Badge estrategia (completo)       │
+    │ ────────────────────────────────   │
+    │  Visión de mercado (color)         │
+    │  Texto apuesta                     │
+    │  [Botón]                           │
+    │  [Expander - Más detalles]         │
+    └────────────────────────────────────┘
+
+    Cada st.markdown con HTML es un bloque cerrado: Streamlit no permite
+    meter widgets (botones, expanders) dentro de un <div> propio.
+    """
+    strategy_color = get_strategy_color(template.market_view)
+    section_bg = COLOR_SYSTEM["background_light"]
+
+    # Contenedor con borde nativo de Streamlit
     with st.container(border=True):
-        st.markdown(f"**{template.name}**")
-        st.markdown(f"*Visión de mercado:* {template.market_view}")
-        st.markdown(template.bet)
-        with st.expander("Más detalles"):
-            st.markdown(f"**Beneficio máximo:** {template.max_profit}")
-            st.markdown(f"**Pérdida máxima:** {template.max_loss}")
-            st.markdown(f"**Cuándo usarla:** {template.when_to_use}")
-            st.markdown(f"**Riesgos:** {template.risks}")
+        # HEADER: icono emoji de la estrategia + nombre, en una sola línea
+        st.markdown(
+            f"""<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+            <span style="font-size:1.15rem; font-weight:600; color:{COLOR_SYSTEM['secondary']}; line-height:1.3;">
+                {get_strategy_icon(template.market_view)} <strong>{template.name}</strong>
+            </span>
+        </div>""",
+            unsafe_allow_html=True,
+        )
+
+        # Badge con la visión de mercado (texto completo, sin recortar)
+        st.markdown(
+            f"""<div style="display:inline-block; margin-top:0.2rem;">{create_strategy_badge(template.market_view)}</div>""",
+            unsafe_allow_html=True,
+        )
+
+        # Línea divisoria HTML simple (evita el padding extra de st.divider)
+        st.markdown(
+            f"""<div style="margin:0.75rem 0; border-top:1px solid {COLOR_SYSTEM['border_subtle']};"></div>""",
+            unsafe_allow_html=True,
+        )
+
+        # Visión de mercado, en el color de su tipo de estrategia
+        st.markdown(
+            f"""<span style="color:{strategy_color}; font-weight:600; font-size:1rem;">{template.market_view}</span>""",
+            unsafe_allow_html=True,
+        )
+
+        # Texto de la apuesta
+        st.markdown(
+            f'<div style="color:{COLOR_SYSTEM["secondary"]}; font-size:0.875rem; line-height:1.5;">{template.bet}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Botón nativo. Si los datos de mercado tienen errores queda
+        # desactivado (con candado y una ayuda que explica por qué).
         st.button(
             "Abrir en el constructor",
             key=f"open_{template.key}",
             on_click=open_template,
             args=(template.key,),
             disabled=disabled,
+            icon=ICON_WIDGETS["lock"] if disabled else None,
+            help="Corrige los datos del mercado en la barra lateral." if disabled else None,
+            width="stretch",
         )
+
+        # Expander con el detalle, en secciones con fondo suave
+        with st.expander("Más detalles", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(
+                    f"""<div style="background-color:{section_bg}; padding:1rem; border-radius:6px;">
+                        <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem;">💰 Rentabilidad</h4>
+                        <p style="margin:0;"><strong>Beneficio máximo:</strong> {template.max_profit}</p>
+                        <p style="margin:0.25rem 0 0 0;"><strong>Pérdida máxima:</strong> {template.max_loss}</p>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+            with col2:
+                st.markdown(
+                    f"""<div style="background-color:{section_bg}; padding:1rem; border-radius:6px;">
+                        <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem;">📅 Cuándo usarla</h4>
+                        <p style="margin:0; color:{strategy_color}; line-height:1.6;">{template.when_to_use}</p>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+            # Sección de riesgos con estilo visual distinto
+            st.markdown(
+                f"""<div style="margin-top:1rem; padding:0.75rem 1rem; background-color:{section_bg}; border-radius:6px; border-left:3px solid {COLOR_SYSTEM['danger']};">
+                    <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem;">⚠️ Riesgos</h4>
+                    <p style="margin:0; font-size:0.85rem; color:{COLOR_SYSTEM['danger']};">{template.risks}</p>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +894,7 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
     st.caption(active_model_caption(market))
     render_leg_rows(market)
     render_expiry_mismatch_warnings()
-    st.button("+ añadir pata", on_click=add_leg)
+    st.button(f"{ICON_WIDGETS['add']} Añadir pata", on_click=add_leg)
     render_chain_picker()
     st.divider()
 
@@ -865,10 +1038,10 @@ def sync_widget(leg: dict, field: str) -> str:
 def reset_label_and_help(is_stock: bool, binomial: bool) -> tuple[str, str]:
     """Texto y ayuda del botón que devuelve la prima a automática."""
     if is_stock:
-        return "↺ spot", "Volver al precio automático: el spot actual."
+        return "🔄 spot", "Volver al precio automático: el spot actual."
     if binomial:
-        return "↺ binomial", "Volver a la prima automática del modelo binomial (americano)."
-    return "↺ BS", "Volver a la prima automática de Black-Scholes (europeo)."
+        return "🔄 binomial", "Volver a la prima automática del modelo binomial (americano)."
+    return "🔄 BS", "Volver a la prima automática de Black-Scholes (europeo)."
 
 
 def price_origin(leg: dict, binomial: bool) -> str:
@@ -888,7 +1061,17 @@ def render_leg_row(number: int, leg: dict, market: Market) -> None:
     is_stock = leg["kind"] == "stock"
     binomial = uses_binomial(market)
     reset_label, reset_help = reset_label_and_help(is_stock, binomial)
-    cols = st.columns([1.1, 1.4, 1.1, 1.0, 1.2, 0.9, 0.8], vertical_alignment="bottom")
+
+    # Título de la pata (bloque HTML cerrado: los widgets van debajo, en columnas)
+    st.markdown(
+        f"""<div style="margin: 0 0 0.25rem 0; display: flex; align-items: center; gap: 0.5rem;">
+        <span style="font-size: 1.1rem; font-weight: 600; color: {COLOR_SYSTEM['secondary']};">
+            {ICON_WIDGETS["add"]} Pata {number}
+        </span>
+    </div>""",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns([1.1, 1.4, 1.1, 1.0, 1.2, 0.9, 0.9], vertical_alignment="bottom")
 
     cols[0].selectbox(
         f"Pata {number}: tipo",
@@ -941,7 +1124,12 @@ def render_leg_row(number: int, leg: dict, market: Market) -> None:
         disabled=not leg["premium_manual"],
         help=reset_help,
     )
-    cols[6].button("Quitar", key=f"leg_{leg_id}_remove", on_click=remove_leg, args=(leg_id,))
+    cols[6].button(
+        f"{ICON_WIDGETS['remove']} Quitar",
+        key=f"leg_{leg_id}_remove",
+        on_click=remove_leg,
+        args=(leg_id,),
+    )
     st.caption(f"Pata {number}: precio {price_origin(leg, binomial)}.")
 
 
@@ -1014,7 +1202,8 @@ def render_metrics(analysis) -> None:
     else:
         breakevens = "ninguno"
 
-    st.markdown("**Resultados al vencimiento**")
+    # Título de sección con emoji y divisor nativo de Streamlit
+    st.subheader("💰 Resultados al vencimiento", divider=True)
     cols = st.columns(3)
     cols[0].metric("Beneficio máximo", best)
     cols[1].metric("Pérdida máxima", worst)
@@ -1023,8 +1212,11 @@ def render_metrics(analysis) -> None:
 
 
 def render_greeks(greeks: dict) -> None:
-    """Tabla de griegas de la posición ("—" si no se pueden calcular)."""
-    st.markdown("**Griegas de la posición (hoy, al precio spot)**")
+    """Tabla de griegas de la posición ("—" si no se pueden calcular).
+
+    Se usa st.table (nativa): respeta el tema claro/oscuro de Streamlit.
+    """
+    st.subheader("📐 Griegas de la posición (hoy, al precio spot)", divider=True)
     rows = []
     for name, label in GREEK_LABELS.items():
         value = greeks.get(name)
@@ -1337,7 +1529,14 @@ def main() -> None:
     st.set_page_config(page_title="Laboratorio de Opciones", layout="wide")
     init_state()
 
-    st.title("Laboratorio de Opciones")
+    # Título principal con icono destacado (sin color fijo: sirve en ambos temas)
+    st.markdown(
+        """<div style="display: flex; align-items: center; gap: 0.75rem; justify-content: center">
+        <span style="font-size: 2.5em;">🎓</span>
+        <span style="font-size: 1.75em; font-weight: 700;">Laboratorio de Opciones</span>
+    </div>""",
+        unsafe_allow_html=True,
+    )
     st.caption("Herramienta de estudio, no asesoría de inversión.")
 
     market = render_sidebar()
@@ -1346,7 +1545,8 @@ def main() -> None:
         refresh_auto_prices(market)
 
     # Con key + on_change="rerun", la pestaña activa vive en
-    # st.session_state["main_tab"] y un callback puede cambiarla.
+    # st.session_state["main_tab"] (su etiqueta, con icono: ver TAB_NAMES)
+    # y un callback puede cambiarla.
     catalog_tab, builder_tab, settings_tab = st.tabs(TAB_NAMES, key="main_tab", on_change="rerun")
     with catalog_tab:
         render_catalog(market_errors)

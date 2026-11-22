@@ -62,7 +62,7 @@ def scenarios_expander(at: AppTest):
 
 def test_app_loads_without_exception(app):
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == ["Catálogo", "Constructor", "Ajustes"]
+    assert [tab.label for tab in app.tabs] == ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes"]
     # Con los datos por defecto hay una pata y se dibuja el gráfico de P&L
     # (más el histograma de escenarios, dentro de su desplegable: Etapa A).
     assert len(app.get("plotly_chart")) == 2
@@ -73,7 +73,7 @@ def test_open_template_fills_legs_and_switches_to_builder(app):
     app.button(key="open_iron_condor").click().run()
 
     assert not app.exception
-    assert app.session_state["main_tab"] == "Constructor"
+    assert app.session_state["main_tab"] == "🛠️ Constructor"
     legs = app.session_state["legs"]
     assert len(legs) == 4
     assert [leg["kind"] for leg in legs] == ["put", "put", "call", "call"]
@@ -594,24 +594,24 @@ def test_index_ignores_selector(app):
 
 def test_reset_button_label_follows_model(app):
     leg_id = app.session_state["legs"][0]["id"]
-    assert reset_label(app, leg_id) == "↺ binomial"
+    assert reset_label(app, leg_id) == "🔄 binomial"
     captions = [caption.value for caption in app.tabs[1].caption]
     assert "Pata 1: precio binomial." in captions
 
     app.radio(key="pricing_model_input").set_value("black_scholes").run()
-    assert reset_label(app, leg_id) == "↺ BS"
+    assert reset_label(app, leg_id) == "🔄 BS"
     captions = [caption.value for caption in app.tabs[1].caption]
     assert "Pata 1: precio Black-Scholes." in captions
 
     app.selectbox(key=f"leg_{leg_id}_kind").set_value("stock").run()
-    assert reset_label(app, leg_id) == "↺ spot"
+    assert reset_label(app, leg_id) == "🔄 spot"
     assert "Pata 1: precio spot." in [caption.value for caption in app.tabs[1].caption]
 
 
 def test_reset_button_label_with_index_is_bs(app):
     app.selectbox(key="underlying").set_value("Índice").run()
     leg_id = app.session_state["legs"][0]["id"]
-    assert reset_label(app, leg_id) == "↺ BS"
+    assert reset_label(app, leg_id) == "🔄 BS"
 
 
 def test_manual_premium_caption_and_reset(app):

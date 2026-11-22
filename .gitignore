@@ -11,3 +11,35 @@ AGENTS.md
 
 # Caché local de datos de mercado (Etapa C1)
 .cache_datos/
+
+# --- Seguridad: nunca versionar secretos ni configuración local ---
+# Variables de entorno (claves de API, tokens); los .env.example sí se versionan
+.env
+.env.*
+!.env.example
+# Claves y certificados
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+# Credenciales y secretos de herramientas
+secrets.*
+credentials*.json
+.streamlit/secrets.toml
+.pypirc
+.netrc
+# Ajustes locales de Claude Code (pueden incluir permisos y rutas de tu equipo)
+.claude/settings.local.json
+*.local.json
+# Historial de pensamiento de la skill vc-sequential-thinking
+.thought-history.json
+
+# --- Archivos locales que no aportan al repositorio ---
+# Enlace simbólico a una skill dentro de .venv (no existe en otros equipos)
+.claude/skills/developing-with-streamlit
+# Logs y archivos del sistema
+*.log
+.DS_Store
+Thumbs.db

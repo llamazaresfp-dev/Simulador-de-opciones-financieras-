@@ -14,10 +14,23 @@ from streamlit.testing.v1 import AppTest
 from datos import FakeProvider
 from estrategias import store
 from estrategias.compare import MSG_MAX
-from estrategias.serialize import MSG_EMPTY_NAME, MSG_NO_LEGS, prepare_document
-from opciones import CommissionSettings, Market
-from tests.test_app_smoke import APP_PATH, FIXED_NOW
-from ui_estrategias import MSG_SV_CONFIRM, MSG_SV_DOWNLOAD_DISABLED, MSG_SV_EMPTY
+from estrategias.serialize import (
+    MAX_BYTES,
+    MSG_EMPTY_NAME,
+    MSG_NO_LEGS,
+    dumps_strategy,
+    prepare_document,
+    strategy_to_dict,
+)
+from opciones import CommissionSettings, Market, default_premium
+from tests.test_app_smoke import APP_PATH, FIXED_NOW, choose_ticker, load
+from ui_estrategias import (
+    MSG_SV_CONFIRM,
+    MSG_SV_DOWNLOAD_DISABLED,
+    MSG_SV_EMPTY,
+    MSG_SV_UPLOAD_FAILED,
+    import_uploaded,
+)
 
 TAB_LABELS = [
     "📊 Catálogo",
@@ -358,3 +371,365 @@ def test_confirm_delete_removes_file_and_selection(tmp_path):
     assert at.multiselect(key="cmp_selected_input").value == [other]
     assert saved_names(at) == ["Otra"]
     assert any("borrada" in text for text in tab_values(at, SAVED, "success"))
+
+
+# ---------------------------------------------------------------------------
+# Bloque 6: abrir (con su mercado / solo las patas), avisos y subida
+# ---------------------------------------------------------------------------
+
+
+# Mercado y comisiones guardados distintos de los de arranque de la app.
+SAVED_MARKET = Market("ETF", 250.0, 0.25, 45, 0.0412, 0.013, "black_scholes")
+SAVED_SETTINGS = CommissionSettings(per_contract=1.25, index_surcharge=0.5, include_close=False)
+MARKET_LEG = leg(
+    kind="put",
+    side=-1,
+    quantity=2.0,
+    strike=240.0,
+    price=3.1,
+    manual=True,
+    premium_source="mercado",
+    bid=3.0,
+    ask=3.2,
+    expiry="2026-12-18",
+)
+MIXED_LEGS = [
+    leg(kind="call", side=1, quantity=1.0, strike=260.0, price=3.33, manual=True),
+    leg(kind="call", side=-1, quantity=1.0, strike=270.0, price=1.0, manual=False),
+    MARKET_LEG,
+]
+STALE_NOTICE = "Pata 3: cotización guardada el 2026-11-20, puede estar desfasada."
+
+
+def save_mixed(tmp_path, name="Mixta ETF") -> str:
+    return save_strategy(tmp_path, name, MIXED_LEGS, SAVED_MARKET, SAVED_SETTINGS, ticker="SPY")
+
+
+def open_saved(at: AppTest, slug: str, with_market: bool) -> AppTest:
+    prefix = "sv_open_mkt_" if with_market else "sv_open_legs_"
+    return click(at, f"{prefix}{slug}")
+
+
+def current_market(at: AppTest) -> Market:
+    state = at.session_state
+    return Market(
+        state["underlying"],
+        state["spot"],
+        state["vol_pct"] / 100,
+        state["days"],
+        state["rate_pct"] / 100,
+        state["q_pct"] / 100,
+        state["pricing_model"],
+    )
+
+
+def test_open_with_market_restores_state_and_widgets(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    open_saved(at, slug, with_market=True)
+
+    assert not at.exception
+    state = at.session_state
+    assert state["main_tab"] == "🛠️ Constructor"
+    assert (state["underlying"], state["spot"], state["days"]) == ("ETF", 250.0, 45)
+    assert state["vol_pct"] == 25.0  # round(0.25 * 100, 10), sin ruido
+    assert state["rate_pct"] == 4.12
+    assert state["q_pct"] == 1.3
+    assert state["pricing_model"] == "black_scholes"
+    assert (state["per_contract"], state["index_surcharge"], state["include_close"]) == (1.25, 0.5, False)
+    # Los widgets muestran lo cargado (DD-20), no solo las claves simples.
+    assert at.selectbox(key="underlying").value == "ETF"
+    assert at.number_input(key="spot").value == 250.0
+    assert at.number_input(key="vol_pct").value == 25.0
+    assert at.number_input(key="days").value == 45
+    assert at.number_input(key="rate_pct").value == 4.12
+    assert at.number_input(key="q_pct").value == 1.3
+    assert at.radio(key="pricing_model_input").value == "black_scholes"
+    assert at.number_input(key="per_contract_input").value == 1.25
+    assert at.number_input(key="index_surcharge_input").value == 0.5
+    assert at.checkbox(key="include_close_input").value is False
+    assert at.text_input(key="sv_name_input").value == "Mixta ETF"
+    assert at.checkbox(key="sv_overwrite_input").value is False
+    legs = state["legs"]
+    assert [(item["kind"], item["side"], item["quantity"], item["strike"]) for item in legs] == [
+        ("call", 1, 1.0, 260.0),
+        ("call", -1, 1.0, 270.0),
+        ("put", -1, 2.0, 240.0),
+    ]
+
+
+def test_later_settings_edit_starts_from_loaded_values(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    open_saved(at, slug, with_market=True)
+    at.number_input(key="index_surcharge_input").set_value(0.75).run()
+
+    state = at.session_state
+    assert state["index_surcharge"] == 0.75
+    assert state["per_contract"] == 1.25
+    assert state["include_close"] is False
+    assert state["pricing_model"] == "black_scholes"
+
+
+def test_open_legs_only_keeps_current_market_and_settings(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    at.number_input(key="spot").set_value(120.0).run()
+    at.number_input(key="per_contract_input").set_value(1.0).run()
+    open_saved(at, slug, with_market=False)
+
+    assert not at.exception
+    state = at.session_state
+    assert (state["underlying"], state["spot"], state["vol_pct"], state["days"]) == ("Acción", 120.0, 20.0, 30)
+    assert (state["per_contract"], state["pricing_model"]) == (1.0, "binomial")
+    assert at.number_input(key="spot").value == 120.0
+    assert at.number_input(key="per_contract_input").value == 1.0
+    assert at.radio(key="pricing_model_input").value == "binomial"
+    assert at.text_input(key="sv_name_input").value == "Mixta ETF"
+    assert len(state["legs"]) == 3
+    # Prima automática recalculada con el mercado ACTUAL (spot 120, binomial).
+    auto = state["legs"][1]
+    assert auto["premium_manual"] is False
+    assert auto["price"] == pytest.approx(default_premium("call", current_market(at), 270.0))
+
+
+def test_manual_premium_is_kept(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    open_saved(at, slug, with_market=False)
+    manual = at.session_state["legs"][0]
+    assert manual["premium_manual"] is True
+    assert manual["price"] == pytest.approx(3.33)
+
+
+def test_market_leg_becomes_manual_with_stale_quote_notice(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    open_saved(at, slug, with_market=True)
+
+    market_leg = at.session_state["legs"][2]
+    assert market_leg["premium_manual"] is True
+    assert market_leg["premium_source"] is None
+    assert (market_leg["bid"], market_leg["ask"], market_leg["expiry"], market_leg["iv_yahoo"]) == (
+        None,
+        None,
+        None,
+        None,
+    )
+    assert market_leg["price"] == pytest.approx(3.1)
+    assert at.session_state["open_notices"] == [STALE_NOTICE]
+    assert STALE_NOTICE in tab_values(at, BUILDER, "info")
+
+
+def test_stale_notice_cleared_when_removing_leg_or_opening_another(tmp_path):
+    slug = save_mixed(tmp_path)
+    other = save_strategy(tmp_path, "Sin mercado")
+    at = saved_app(tmp_path)
+    open_saved(at, slug, with_market=True)
+    open_saved(at, other, with_market=False)
+    assert at.session_state["open_notices"] == []
+
+    open_saved(at, slug, with_market=True)
+    leg_id = at.session_state["legs"][0]["id"]
+    click(at, f"leg_{leg_id}_remove")
+    assert at.session_state["open_notices"] == []
+    assert STALE_NOTICE not in tab_values(at, BUILDER, "info")
+
+
+def test_open_clears_loaded_data_and_backtest(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    choose_ticker(at, "ETF", "SPY")
+    load(at)
+    assert at.session_state["snapshot"] is not None
+    at.session_state["bt_history"] = "algo cargado"
+    open_saved(at, slug, with_market=False)
+
+    state = at.session_state
+    assert not at.exception
+    assert state["ticker_choice"] == "Entrada manual"
+    assert state["snapshot"] is None
+    assert state["expiry_choice"] is None
+    assert state["bt_history"] is None
+
+
+def test_new_leg_ids_are_unique_and_open_is_idempotent(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    first_id = at.session_state["next_leg_id"]
+    open_saved(at, slug, with_market=True)
+    ids = [item["id"] for item in at.session_state["legs"]]
+    assert len(set(ids)) == 3 and min(ids) >= first_id
+    snapshot = [(item["kind"], item["strike"], item["price"]) for item in at.session_state["legs"]]
+
+    open_saved(at, slug, with_market=True)
+    assert not at.exception
+    again = [(item["kind"], item["strike"], item["price"]) for item in at.session_state["legs"]]
+    assert again == snapshot
+    assert at.session_state["next_leg_id"] == first_id + 6
+
+
+def test_open_resets_overwrite_checkbox(tmp_path):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    at.checkbox(key="sv_overwrite_input").check().run()
+    open_saved(at, slug, with_market=False)
+    assert at.session_state["sv_overwrite"] is False
+    assert at.checkbox(key="sv_overwrite_input").value is False
+
+
+@pytest.mark.parametrize("failure", ["missing", "raises"])
+def test_open_failure_shows_error_and_keeps_state(tmp_path, monkeypatch, failure):
+    slug = save_mixed(tmp_path)
+    at = saved_app(tmp_path)
+    before = [dict(item) for item in at.session_state["legs"]]
+
+    def fake_read(*args, **kwargs):
+        if failure == "raises":
+            raise OverflowError("motor")
+        return None, "No existe la estrategia."
+
+    monkeypatch.setattr(store, "read_strategy", fake_read)
+    open_saved(at, slug, with_market=True)
+
+    assert not at.exception
+    errors = tab_values(at, SAVED, "error")
+    assert any(text.startswith("No se pudo abrir «") for text in errors)
+    assert at.session_state["legs"] == before
+    assert at.session_state["spot"] == 100.0
+    assert at.session_state["main_tab"] == "📊 Catálogo"
+
+
+def hostile_document(path: list, value) -> bytes:
+    """Documento válido con un campo cambiado por un valor hostil (JSON a mano)."""
+    doc = strategy_to_dict([leg()], DEFAULT_MARKET, DEFAULT_SETTINGS, "Hostil", FIXED_NOW)
+    target = doc
+    for step in path[:-1]:
+        target = target[step]
+    target[path[-1]] = value
+    text = json.dumps(doc).replace('"__INF__"', "1e999")
+    return text.encode("utf-8")
+
+
+HOSTILE_CASES = [
+    (["legs", 0, "strike"], 1e300),
+    (["market", "spot"], 1e300),
+    (["market", "spot"], 1e-300),
+    (["legs", 0, "quantity"], 1e308),
+    (["market", "rate"], -1e6),
+    (["legs", 0, "price"], "__INF__"),
+]
+
+
+@pytest.mark.parametrize(("path", "value"), HOSTILE_CASES)
+def test_hostile_file_in_folder_is_skipped_never_opened(tmp_path, path, value):
+    save_strategy(tmp_path, "Buena")
+    (folder_of(tmp_path) / "hostil.json").write_bytes(hostile_document(path, value))
+    at = saved_app(tmp_path)
+
+    assert not at.exception
+    assert saved_names(at) == ["Buena"]
+    assert any("hostil.json" in text for text in tab_values(at, SAVED, "caption"))
+    assert not any(str(button.key).endswith("_hostil") for button in at.button)
+    assert not at.error and not at.warning
+
+
+# --- Subida de JSON: función pura (la misma que usa el botón) ---
+
+
+def valid_bytes(name="Subida") -> bytes:
+    raw, errors = prepare_document([leg()], DEFAULT_MARKET, DEFAULT_SETTINGS, name, FIXED_NOW)
+    assert errors == []
+    return raw
+
+
+def test_import_uploaded_valid_saves_exact_bytes(tmp_path):
+    raw = valid_bytes()
+    ok, message = import_uploaded(raw, folder_of(tmp_path))
+    assert ok and "guardada" in message
+    assert (folder_of(tmp_path) / "subida.json").read_bytes() == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"{corrupto",
+        b" " * (MAX_BYTES + 1),
+        valid_bytes().replace(b'"schema_version": 1', b'"schema_version": 2'),
+        hostile_document(["legs", 0, "strike"], 1e300),
+        hostile_document(["market", "spot"], "__INF__"),
+        hostile_document(["name"], "a\u0000b"),
+        None,
+    ],
+    ids=["corrupto", "grande", "version-2", "strike-1e300", "spot-1e999", "nombre-nul", "none"],
+)
+def test_import_uploaded_rejects_bad_bytes(tmp_path, raw):
+    ok, message = import_uploaded(raw, folder_of(tmp_path))
+    assert ok is False and message
+    assert json_files(tmp_path) == []
+
+
+def test_import_uploaded_path_traversal_name_stays_inside(tmp_path):
+    raw = valid_bytes("../../fuera")
+    ok, _message = import_uploaded(raw, folder_of(tmp_path))
+    assert ok
+    assert json_files(tmp_path) == ["fuera.json"]
+    assert not (tmp_path.parent / "fuera.json").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["estrategias"]
+
+
+def test_import_uploaded_existing_name_needs_overwrite(tmp_path):
+    raw = valid_bytes()
+    assert import_uploaded(raw, folder_of(tmp_path))[0]
+    ok, message = import_uploaded(raw, folder_of(tmp_path))
+    assert ok is False and "Ya existe" in message
+    assert import_uploaded(raw, folder_of(tmp_path), overwrite=True)[0]
+    assert json_files(tmp_path) == ["subida.json"]
+
+
+def test_import_uploaded_respects_limit_of_100(tmp_path):
+    for number in range(100):
+        assert import_uploaded(valid_bytes(f"E{number}"), folder_of(tmp_path))[0]
+    ok, message = import_uploaded(valid_bytes("La 101"), folder_of(tmp_path))
+    assert ok is False and "100" in message
+    assert len(json_files(tmp_path)) == 100
+
+
+def test_import_uploaded_never_raises(tmp_path, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("disco")
+
+    monkeypatch.setattr(store, "save_document", boom)
+    assert import_uploaded(valid_bytes(), folder_of(tmp_path)) == (False, MSG_SV_UPLOAD_FAILED)
+
+
+# --- Subida de JSON: widget real (AppTest 1.67 sí soporta st.file_uploader) ---
+
+
+def test_upload_button_without_file_does_nothing(tmp_path):
+    at = saved_app(tmp_path)
+    click(at, "sv_upload_save")
+    assert not at.exception
+    assert not at.error and not at.success
+    assert json_files(tmp_path) == []
+
+
+def test_upload_widget_saves_and_lists(tmp_path):
+    at = saved_app(tmp_path)
+    at.file_uploader(key="sv_upload").set_value(("mia.json", valid_bytes("Subida"), "application/json")).run()
+    click(at, "sv_upload_save")
+
+    assert not at.exception
+    assert json_files(tmp_path) == ["subida.json"]
+    assert saved_names(at) == ["Subida"]
+    assert any("guardada" in text for text in tab_values(at, SAVED, "success"))
+
+
+def test_upload_widget_rejects_corrupt_file(tmp_path):
+    at = saved_app(tmp_path)
+    at.file_uploader(key="sv_upload").set_value(("rota.json", b"{roto", "application/json")).run()
+    click(at, "sv_upload_save")
+
+    assert not at.exception
+    assert any("No se pudo guardar" in text for text in tab_values(at, SAVED, "error"))
+    assert json_files(tmp_path) == []

@@ -28,6 +28,8 @@ from datos.errors import MSG_EMPTY
 from datos.service import MSG_Q_INDEX, MSG_Q_MISSING, age_text, load_or_cache
 from datos.tickers import MANUAL_ENTRY, resolve_ticker, ticker_options
 
+from estrategias import store
+
 from opciones import (
     TEMPLATES,
     CommissionSettings,
@@ -50,7 +52,12 @@ from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES, PRICING_MOD
 from opciones.validation import MSG_NOT_ADVICE
 from ui_backtest import clear_backtest_state, init_backtest_state, render_backtest
 from ui_comparar import init_compare_state, render_compare
-from ui_estrategias import init_strategies_state, render_my_strategies, render_save_section
+from ui_estrategias import (
+    init_strategies_state,
+    render_my_strategies,
+    render_open_notices,
+    render_save_section,
+)
 
 # ============================================================================
 # MEJORAS UI - Paleta conservadora con sombras, padding y tipografía
@@ -413,6 +420,8 @@ def add_leg() -> None:
 def remove_leg(leg_id: int) -> None:
     """Botón "➖ Quitar" de una fila."""
     st.session_state["legs"] = [leg for leg in st.session_state["legs"] if leg["id"] != leg_id]
+    # Los avisos de "Abrir" van por número de pata: ya no corresponden.
+    st.session_state["open_notices"] = []
 
 
 def on_leg_field_change(leg_id: int, field: str) -> None:
@@ -529,6 +538,7 @@ def on_ticker_change() -> None:
     """
     clear_loaded_data()
     clear_backtest_state()
+    st.session_state["open_notices"] = []
 
 
 def strategies_dir_from_state() -> str | None:
@@ -538,6 +548,105 @@ def strategies_dir_from_state() -> str | None:
     llamada (así los tests pueden redirigirla).
     """
     return st.session_state.get("strategies_dir")
+
+
+# ---------------------------------------------------------------------------
+# Abrir una estrategia guardada (Etapa D)
+# ---------------------------------------------------------------------------
+
+MSG_OPEN_FAILED = "No se pudo abrir «{name}»."
+MSG_OPEN_STALE_QUOTE = "Pata {number}: cotización guardada el {date}, puede estar desfasada."
+
+
+def fraction_to_percent(value: float) -> float:
+    """Fracción -> % para la barra lateral, sin ruido de coma flotante (0.2 -> 20.0)."""
+    return round(value * 100, 10)
+
+
+def loaded_leg_spec(saved) -> dict:
+    """Pata guardada -> argumentos de new_leg_dict.
+
+    - Prima manual o de mercado: queda como manual con la prima guardada
+      (la pata de mercado pierde bid/ask/vencimiento: ya no es de mercado).
+    - Prima automática: premium_manual=False; refresh_auto_prices la
+      recalcula con el mercado resultante en el mismo rerun.
+    """
+    manual = saved.premium_manual or saved.premium_source in ("mercado", "manual")
+    return {
+        "kind": saved.kind,
+        "side": saved.side,
+        "quantity": saved.quantity,
+        "strike": saved.strike,
+        "price": saved.price,
+        "premium_manual": bool(manual),
+    }
+
+
+def market_state_updates(strategy) -> dict:
+    """Claves de la barra lateral y de Ajustes (simples Y de widget, DD-20)."""
+    market = strategy.market
+    commissions = strategy.commissions
+    return {
+        # Las claves de la barra lateral son directamente las de sus widgets.
+        "underlying": market.underlying,
+        "spot": float(market.spot),
+        "vol_pct": fraction_to_percent(market.vol),
+        "days": int(market.days),
+        "rate_pct": fraction_to_percent(market.rate),
+        "q_pct": fraction_to_percent(market.q),
+        # Ajustes: entrada simple y widget, para que el widget muestre lo cargado.
+        "pricing_model": market.pricing_model,
+        "pricing_model_input": market.pricing_model,
+        "per_contract": float(commissions.per_contract),
+        "per_contract_input": float(commissions.per_contract),
+        "index_surcharge": float(commissions.index_surcharge),
+        "index_surcharge_input": float(commissions.index_surcharge),
+        "include_close": bool(commissions.include_close),
+        "include_close_input": bool(commissions.include_close),
+    }
+
+
+def open_saved_strategy(slug: str, with_market: bool) -> None:
+    """Botones "Abrir con su mercado" / "Abrir solo las patas" (callback).
+
+    Es un callback (como open_template): se ejecuta ANTES de dibujar los
+    widgets, así que puede escribir sus claves. Todo se prepara primero y
+    solo se aplica si nada falló: un error deja el estado sin cambios y un
+    mensaje en español en la pestaña "Mis estrategias" (DD-22).
+    """
+    try:
+        stored, message = store.read_strategy(slug, strategies_dir_from_state())
+        if stored is None:
+            st.session_state["sv_message"] = ("error", f"{MSG_OPEN_FAILED.format(name=slug)} {message}")
+            return
+        strategy = stored.strategy
+        specs = [loaded_leg_spec(saved) for saved in strategy.legs]
+        saved_day = strategy.saved_at[:10]
+        notices = [
+            MSG_OPEN_STALE_QUOTE.format(number=number, date=saved_day)
+            for number, saved in enumerate(strategy.legs, start=1)
+            if saved.premium_source == "mercado"
+        ]
+        updates = market_state_updates(strategy) if with_market else {}
+    except Exception:
+        st.session_state["sv_message"] = ("error", MSG_OPEN_FAILED.format(name=slug))
+        return
+
+    for key, value in updates.items():
+        st.session_state[key] = value
+    # Cambiar `underlying` desde un callback no dispara on_underlying_change:
+    # se limpian a mano el ticker, los datos cargados y el Backtest.
+    st.session_state["ticker_choice"] = MANUAL_ENTRY
+    clear_loaded_data()
+    clear_backtest_state()
+    st.session_state["legs"] = [new_leg_dict(**spec) for spec in specs]
+    st.session_state["open_notices"] = notices
+    st.session_state["sv_name"] = strategy.name
+    st.session_state["sv_name_input"] = strategy.name
+    st.session_state["sv_overwrite"] = False
+    st.session_state["sv_overwrite_input"] = False
+    st.session_state["sv_message"] = None
+    st.session_state["main_tab"] = TAB_NAMES[1]
 
 
 def current_time() -> datetime:
@@ -954,6 +1063,7 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
         current_time(),
         strategies_dir_from_state(),
     )
+    render_open_notices()
 
 
 def chain_picker_visible() -> bool:
@@ -1604,7 +1714,7 @@ def main() -> None:
             strategies_dir_from_state(),
         )
     with saved_tab:
-        render_my_strategies(strategies_dir_from_state(), current_time(), None)
+        render_my_strategies(strategies_dir_from_state(), current_time(), open_saved_strategy)
     with settings_tab:
         render_settings()
     with backtest_tab:

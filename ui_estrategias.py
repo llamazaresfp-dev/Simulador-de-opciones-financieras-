@@ -30,7 +30,7 @@ import streamlit as st
 
 from estrategias import store
 from estrategias.compare import MAX_STRATEGIES, MSG_MAX
-from estrategias.serialize import MAX_NAME_LEN, prepare_document
+from estrategias.serialize import MAX_BYTES, MAX_NAME_LEN, prepare_document
 
 # Guardadas que caben en la comparación (la del Constructor ocupa un hueco).
 MAX_SELECTED = MAX_STRATEGIES - 1
@@ -61,6 +61,11 @@ MSG_SV_ADDED = "«{name}» se añadió a la comparación (pestaña «⚖️ Comp
 MSG_SV_ALREADY = "«{name}» ya está en la comparación."
 MSG_SV_CONFIRM = "¿Borrar «{name}»? Esta acción no se puede deshacer."
 MSG_SV_DELETED = "Estrategia «{name}» borrada."
+MSG_SV_UPLOAD_INTRO = (
+    "Sube un archivo JSON descargado de esta app. Se revisa con cuidado antes de "
+    "aceptarlo (tamaño máximo 256 KB) y se añade a la lista."
+)
+MSG_SV_UPLOAD_FAILED = "No se pudo leer el archivo subido."
 
 # ---------------------------------------------------------------------------
 # Estado
@@ -218,6 +223,61 @@ def save_clicked(raw, errors: list[str], strategies_dir) -> None:
         st.error(result.message)
 
 
+def render_open_notices() -> None:
+    """Avisos de la última estrategia abierta (p. ej. cotización guardada vieja).
+
+    Va al final del Constructor; solo dibuja algo si hay avisos.
+    """
+    for message in st.session_state.get("open_notices", []):
+        st.info(message)
+
+
+# ---------------------------------------------------------------------------
+# Subir un archivo JSON
+# ---------------------------------------------------------------------------
+
+
+def import_uploaded(raw, strategies_dir=None, overwrite: bool = False) -> tuple[bool, str]:
+    """Valida y guarda los bytes de un archivo subido. Devuelve (ok, mensaje).
+
+    Es la misma función que usa el botón "Guardar archivo subido". El
+    archivo se revisa con parse_strategy_json (dentro de save_document):
+    si no vale, no se escribe nada. Nunca lanza.
+    """
+    try:
+        if not isinstance(raw, (bytes, bytearray)):
+            return False, MSG_SV_UPLOAD_FAILED
+        result = store.save_document(bytes(raw), strategies_dir, overwrite)
+    except Exception:
+        return False, MSG_SV_UPLOAD_FAILED
+    return result.ok, result.message
+
+
+def render_upload(strategies_dir) -> None:
+    """Subida de un JSON: archivo, "sobrescribir" y botón (procesado en el cuerpo).
+
+    Va ANTES de la lista: así lo recién subido ya aparece en esta ejecución.
+    """
+    with st.expander("📤 Subir una estrategia (JSON)"):
+        st.caption(MSG_SV_UPLOAD_INTRO)
+        uploaded = st.file_uploader("Archivo JSON", type=["json"], key="sv_upload")
+        st.checkbox(
+            "Sobrescribir si ya existe una con el mismo nombre",
+            key=_sync_input("sv_up_overwrite"),
+            on_change=copy_sv_field,
+            args=("sv_up_overwrite",),
+        )
+        if st.button("📤 Guardar archivo subido", key="sv_upload_save") and uploaded is not None:
+            # Se lee como mucho un byte más del tope: así un archivo enorme se
+            # rechaza sin leerlo entero (DD-17).
+            raw = uploaded.read(MAX_BYTES + 1)
+            ok, message = import_uploaded(raw, strategies_dir, st.session_state["sv_up_overwrite"])
+            if ok:
+                st.success(message)
+            else:
+                st.error(message)
+
+
 # ---------------------------------------------------------------------------
 # Pestaña "Mis estrategias"
 # ---------------------------------------------------------------------------
@@ -264,6 +324,7 @@ def render_my_strategies(strategies_dir, now, on_open) -> None:
     st.subheader("💾 Mis estrategias", divider=True)
     st.caption(MSG_SV_LIST_INTRO)
     render_message()
+    render_upload(strategies_dir)
 
     items, warnings = store.list_saved(strategies_dir)
     for warning in warnings:

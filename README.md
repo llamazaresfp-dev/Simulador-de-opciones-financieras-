@@ -15,18 +15,20 @@ Lo construí para aprender dos cosas a la vez:
 - **Opciones financieras:** cómo se valora una opción, qué son las griegas, qué hace cada estrategia y cuándo tiene sentido.
 - **Programación en Python:** partiendo de nivel básico, con código sencillo y explícito, comentarios en español y tests para comprobar que los cálculos son correctos.
 
-Se desarrolló por etapas pequeñas (MVP → Monte Carlo → modelo binomial → datos reales → backtest), cada una con su especificación, su plan y sus tests. El documento [`DISENO.md`](DISENO.md) explica qué se decidió y por qué.
+Se desarrolló por etapas pequeñas (MVP → Monte Carlo → modelo binomial → datos reales → backtest → comparar y guardar estrategias), cada una con su especificación, su plan y sus tests. El documento [`DISENO.md`](DISENO.md) explica qué se decidió y por qué.
 
 ---
 
 ## ✨ Qué hace
 
-La app tiene cuatro pestañas:
+La app tiene seis pestañas:
 
 | Pestaña | Para qué sirve |
 |---|---|
 | 📊 **Catálogo** | 8 estrategias clásicas (long call, long put, covered call, protective put, bull call spread, bear put spread, long straddle, iron condor) con explicación, riesgos y un botón para abrirlas en el constructor. |
-| 🛠️ **Constructor** | Combina "patas" (calls, puts y acciones, compradas o vendidas) y ve al momento el gráfico de P&L hoy y al vencimiento, beneficio y pérdida máximos, puntos de equilibrio y griegas. Incluye una simulación **Monte Carlo** con la probabilidad de beneficio y la volatilidad implícita de cada pata. |
+| 🛠️ **Constructor** | Combina "patas" (calls, puts y acciones, compradas o vendidas) y ve al momento el gráfico de P&L hoy y al vencimiento, beneficio y pérdida máximos, puntos de equilibrio y griegas. Incluye una simulación **Monte Carlo** con la probabilidad de beneficio y la volatilidad implícita de cada pata. Al final puedes **guardar** la estrategia con un nombre. |
+| ⚖️ **Comparar** | Hasta 4 estrategias (la del constructor y 3 guardadas) en el mismo gráfico al vencimiento, con una tabla lado a lado: beneficio y pérdida máximos, breakevens, comisiones, prima neta, probabilidad de beneficio y, si quieres, curvas "hoy" y griegas. Todas se valoran con el mercado actual. |
+| 💾 **Mis estrategias** | Lista de estrategias guardadas: abrirlas en el constructor (con su mercado o solo sus patas), añadirlas a la comparación, borrarlas, y descargarlas o subirlas como archivo JSON. |
 | ⚙️ **Ajustes** | Comisiones configurables (por contrato, recargo para índices, cierre) y el modelo de valoración (binomial o Black-Scholes). |
 | 📈 **Backtest** | Comprueba con el histórico real del subyacente si la probabilidad de beneficio que da la app se cumple: gráfico de fiabilidad, puntuación de Brier y análisis de colas. |
 
@@ -35,6 +37,7 @@ La app tiene cuatro pestañas:
 - **Datos reales gratuitos** de Yahoo Finance (≈15 min de retraso) para una lista de subyacentes muy líquidos: SPX, SPY, QQQ, IWM, AAPL, MSFT, NVDA, AMZN, META, GOOGL y TSLA. Solo se ofrecen opciones con liquidez suficiente.
 - **Modelos de valoración:** Black-Scholes para índices (opciones europeas) y árbol binomial de Cox-Ross-Rubinstein para acciones y ETF (opciones americanas).
 - **Caché local:** los datos descargados se guardan en disco, así que la app funciona aunque falle la conexión.
+- **Estrategias guardadas:** se guardan en la carpeta local `.estrategias/` (no se sube a git). Los archivos JSON que subes se revisan antes de usarlos: un archivo roto o manipulado da un mensaje claro y nunca rompe la app.
 - **Más de 3000 tests** automáticos que comprueban los cálculos contra valores conocidos (Hull, paridad put-call, etc.).
 
 ---
@@ -92,7 +95,8 @@ Se abrirá en el navegador en <http://localhost:8501>.
 1. En **📊 Catálogo**, elige una estrategia y pulsa **"Abrir en el constructor"**.
 2. En **🛠️ Constructor**, cambia el precio, la volatilidad o los días en la barra lateral y mira cómo cambia el gráfico.
 3. Para usar datos reales: en la barra lateral elige un **ticker** (p. ej. SPY), pulsa **"Cargar datos"**, elige un vencimiento y añade patas desde la cadena real.
-4. En **📈 Backtest**, con un ticker elegido, pulsa **"Cargar histórico"** y luego **"Calcular"**.
+4. Al final del constructor, escribe un nombre y pulsa **"Guardar"**. En **💾 Mis estrategias** añade varias a la comparación y míralas juntas en **⚖️ Comparar**.
+5. En **📈 Backtest**, con un ticker elegido, pulsa **"Cargar histórico"** y luego **"Calcular"**.
 
 ---
 
@@ -115,6 +119,8 @@ LIVE_DATA=1 .venv/bin/pytest tests/test_datos_live.py -q
 ```
 app.py            Interfaz web (Streamlit): pestañas, barra lateral y gráficos
 ui_backtest.py    Pestaña "Backtest"
+ui_comparar.py    Pestaña "Comparar"
+ui_estrategias.py Pestaña "Mis estrategias" y apartado "Guardar"
 opciones/         Motor de cálculo puro (sin interfaz ni red)
   pricing.py        Black-Scholes y griegas
   binomial.py       Árbol binomial para opciones americanas
@@ -126,6 +132,7 @@ opciones/         Motor de cálculo puro (sin interfaz ni red)
   backtest.py       Backtest histórico
   calibration.py    Estadísticas de calibración (Brier, Wilson, colas)
 datos/            Descarga de datos de mercado, filtros de liquidez y caché local
+estrategias/      Guardar, cargar y validar estrategias (JSON) y cálculos de la comparación
 tests/            Tests automáticos (pytest)
 DISENO.md         Documento de diseño: qué se decidió y por qué
 process/          Especificaciones, planes e informes de cada etapa

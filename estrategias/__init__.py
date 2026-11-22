@@ -5,6 +5,10 @@ conoce. No importa Streamlit ni hace nada de red.
 
 - serialize: estrategia <-> JSON versionado y validación estricta de
   archivos (nunca lanza).
+- store: carpeta `.estrategias/` (un JSON por estrategia, escritura
+  atómica). Se usa como `from estrategias import store`.
+- compare: malla común, prima neta y filas de la comparación. Se usa
+  como `from estrategias import compare`.
 """
 
 from estrategias.serialize import (

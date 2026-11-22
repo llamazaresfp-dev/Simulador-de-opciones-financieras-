@@ -62,7 +62,14 @@ def scenarios_expander(at: AppTest):
 
 def test_app_loads_without_exception(app):
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes", "📈 Backtest"]
+    assert [tab.label for tab in app.tabs] == [
+        "📊 Catálogo",
+        "🛠️ Constructor",
+        "⚖️ Comparar",
+        "💾 Mis estrategias",
+        "⚙️ Ajustes",
+        "📈 Backtest",
+    ]
     # Con los datos por defecto hay una pata y se dibuja el gráfico de P&L
     # (más el histograma de escenarios, dentro de su desplegable: Etapa A).
     assert len(app.get("plotly_chart")) == 2
@@ -586,7 +593,7 @@ def test_index_ignores_selector(app):
     after = [leg["price"] for leg in app.session_state["legs"]]
     assert after == before
     builder_captions = [caption.value for caption in app.tabs[1].caption]
-    settings_captions = [caption.value for caption in app.tabs[2].caption]
+    settings_captions = [caption.value for caption in app.tabs[4].caption]
     assert any("no tiene efecto" in text for text in builder_captions)
     assert any("no tiene efecto" in text for text in settings_captions)
     assert MSG_EUROPEAN in [info.value for info in app.tabs[1].info]

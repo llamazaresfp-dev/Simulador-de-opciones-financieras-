@@ -27,8 +27,8 @@ TODAY = FIXED_NOW.date()
 
 
 def backtest_tab(at: AppTest):
-    """La pestaña Backtest (la 4.ª)."""
-    return at.tabs[3]
+    """La pestaña Backtest (la última)."""
+    return at.tabs[5]
 
 
 def set_param(at: AppTest, field: str, value) -> AppTest:
@@ -86,11 +86,11 @@ def yahoo_spy(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_backtest_is_the_fourth_tab(tmp_path):
+def test_backtest_is_the_last_tab(tmp_path):
     at = data_app(tmp_path)
     assert not at.exception
-    assert [tab.label for tab in at.tabs][3] == BACKTEST_TAB
-    assert len(at.tabs) == 4
+    assert [tab.label for tab in at.tabs][5] == BACKTEST_TAB
+    assert len(at.tabs) == 6
 
 
 def test_default_values_of_controls(tmp_path):

@@ -49,6 +49,8 @@ from opciones import (
 from opciones.models import PRICING_BINOMIAL, PRICING_BLACK_SCHOLES, PRICING_MODELS
 from opciones.validation import MSG_NOT_ADVICE
 from ui_backtest import clear_backtest_state, init_backtest_state, render_backtest
+from ui_comparar import init_compare_state, render_compare
+from ui_estrategias import init_strategies_state, render_my_strategies, render_save_section
 
 # ============================================================================
 # MEJORAS UI - Paleta conservadora con sombras, padding y tipografía
@@ -144,7 +146,14 @@ def create_strategy_badge(market_view: str) -> str:
 
 # Etiquetas de las pestañas (con icono). El valor de st.session_state["main_tab"]
 # es la etiqueta completa de la pestaña activa.
-TAB_NAMES = ["📊 Catálogo", "🛠️ Constructor", "⚙️ Ajustes", "📈 Backtest"]
+TAB_NAMES = [
+    "📊 Catálogo",
+    "🛠️ Constructor",
+    "⚖️ Comparar",
+    "💾 Mis estrategias",
+    "⚙️ Ajustes",
+    "📈 Backtest",
+]
 
 UNDERLYINGS = ["Acción", "ETF", "Índice"]
 KIND_LABELS = {"call": "Call", "put": "Put", "stock": "Acción"}
@@ -220,6 +229,12 @@ def init_state() -> None:
 
     # Pestaña Backtest (Etapa C2): sus controles, histórico y resultado.
     init_backtest_state()
+
+    # Estrategias guardadas y comparación (Etapa D). Solo para pruebas:
+    # "strategies_dir" se puede poner en session_state antes de arrancar;
+    # si no está, se usa la carpeta .estrategias/ (ver estrategias.store).
+    init_strategies_state()
+    init_compare_state()
 
     # Datos de mercado en directo (Etapa C1). Con "Entrada manual" nada de
     # esto se usa y la app funciona exactamente como antes.
@@ -514,6 +529,15 @@ def on_ticker_change() -> None:
     """
     clear_loaded_data()
     clear_backtest_state()
+
+
+def strategies_dir_from_state() -> str | None:
+    """Carpeta de estrategias de las pruebas, o None (= la carpeta por defecto).
+
+    None hace que estrategias.store lea su carpeta por defecto en cada
+    llamada (así los tests pueden redirigirla).
+    """
+    return st.session_state.get("strategies_dir")
 
 
 def current_time() -> datetime:
@@ -920,6 +944,16 @@ def render_builder(market: Market, market_errors: list[str]) -> None:
         render_scenarios(market, legs)
 
     render_notices(market)
+    # Guardar (Etapa D): al final, para no mover nada de lo anterior.
+    render_save_section(
+        st.session_state["legs"],
+        market,
+        market_errors,
+        settings_from_state(),
+        resolve_ticker(st.session_state["underlying"], st.session_state["ticker_choice"]),
+        current_time(),
+        strategies_dir_from_state(),
+    )
 
 
 def chain_picker_visible() -> bool:
@@ -1553,13 +1587,24 @@ def main() -> None:
     # Con key + on_change="rerun", la pestaña activa vive en
     # st.session_state["main_tab"] (su etiqueta, con icono: ver TAB_NAMES)
     # y un callback puede cambiarla.
-    catalog_tab, builder_tab, settings_tab, backtest_tab = st.tabs(
+    catalog_tab, builder_tab, compare_tab, saved_tab, settings_tab, backtest_tab = st.tabs(
         TAB_NAMES, key="main_tab", on_change="rerun"
     )
     with catalog_tab:
         render_catalog(market_errors)
     with builder_tab:
         render_builder(market, market_errors)
+    with compare_tab:
+        render_compare(
+            market,
+            market_errors,
+            legs_from_state(),
+            settings_from_state(),
+            sim_settings_from_state(),
+            strategies_dir_from_state(),
+        )
+    with saved_tab:
+        render_my_strategies(strategies_dir_from_state(), current_time(), None)
     with settings_tab:
         render_settings()
     with backtest_tab:

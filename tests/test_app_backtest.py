@@ -351,3 +351,246 @@ def test_default_app_has_four_tabs_and_no_backtest_noise():
     assert not at.exception
     assert not at.warning and not at.error
     assert not backtest_tab(at).get("plotly_chart")
+
+
+# ---------------------------------------------------------------------------
+# Bloque 10: "Calcular", gráficos, tabla, avisos y caché de sesión
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+import re  # noqa: E402
+
+from datos import covers  # noqa: E402
+from opciones.calibration import calibration_bins  # noqa: E402
+from opciones.validation import MSG_NOT_ADVICE  # noqa: E402
+
+NAN_RE = re.compile(r"\bnan\b|\binf\b", re.IGNORECASE)
+
+
+@pytest.fixture
+def run_spy(monkeypatch):
+    """Cuenta las llamadas a run_backtest hechas desde la pestaña."""
+    calls = []
+    real = ui_backtest.run_backtest
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ui_backtest, "run_backtest", spy)
+    return calls
+
+
+def run_click(at: AppTest) -> AppTest:
+    """Pulsa "Calcular"."""
+    at.button(key="bt_run").click().run()
+    return at
+
+
+def ready_app(tmp_path, provider=None, years=3, step=20) -> tuple[AppTest, FakeProvider]:
+    """SPY con histórico cargado y paso grande (cálculo rápido)."""
+    at, provider = spy_app(tmp_path, provider, years=years)
+    set_param(at, "bt_step", step)
+    load_history_click(at)
+    return at, provider
+
+
+def tab_charts(at: AppTest) -> list[dict]:
+    """Figuras plotly de la pestaña Backtest (como diccionarios)."""
+    return [json.loads(chart.proto.spec) for chart in backtest_tab(at).get("plotly_chart")]
+
+
+def all_tab_texts(at: AppTest) -> list[str]:
+    texts = []
+    for kind in ("caption", "info", "warning", "markdown"):
+        texts += tab_texts(at, kind)
+    texts += [metric.value for metric in backtest_tab(at).metric]
+    for frame in backtest_tab(at).dataframe:
+        texts += [str(value) for value in frame.value.to_numpy().ravel()]
+    return texts
+
+
+def test_run_without_history_warns(tmp_path, run_spy):
+    at, _ = spy_app(tmp_path)
+    run_click(at)
+    assert ui_backtest.MSG_BT_NEED_HISTORY in tab_texts(at, "warning")
+    assert at.session_state["bt_result"] is None
+    assert run_spy == []
+
+
+def test_run_with_more_years_than_loaded_asks_to_reload(tmp_path, run_spy):
+    at, provider = ready_app(tmp_path, years=3)
+    set_param(at, "bt_years", 8)
+    run_click(at)
+    expected = "El histórico cargado no cubre 8 años: pulsa «Cargar histórico»"
+    assert ui_backtest.MSG_BT_NOT_COVERED.format(years=8) == expected
+    assert expected in tab_texts(at, "warning")
+    assert at.session_state["bt_result"] is None
+    assert run_spy == []
+
+    # Con menos años sí calcula, sin avisar de cobertura.
+    set_param(at, "bt_years", 2)
+    run_click(at)
+    assert len(run_spy) == 1
+    assert at.session_state["bt_result"] is not None
+    assert expected not in tab_texts(at, "warning")
+
+    # Cargar con 8 y calcular: calcula.
+    set_param(at, "bt_years", 8)
+    load_history_click(at)
+    run_click(at)
+    assert len(run_spy) == 2
+    assert not any("no cubre" in text for text in tab_texts(at, "warning"))
+
+
+def test_run_one_day_after_load_is_still_covered(tmp_path, run_spy):
+    """Mismo reloj inyectado en ambos lados; un día después sigue cubierto (E-7)."""
+    at, _ = ready_app(tmp_path, years=3)
+    later = FIXED_NOW + timedelta(days=1)
+    at.session_state["clock"] = lambda: later
+    run_click(at)
+    assert len(run_spy) == 1
+    assert not any("no cubre" in text for text in tab_texts(at, "warning"))
+
+
+def test_same_day_requested_start_equality_covers():
+    need = start_for_years(TODAY, 3)
+    # Primer dato muy posterior, pero se pidió justo ese inicio: cubre.
+    assert covers((TODAY - timedelta(days=30)).isoformat(), need, need)
+
+
+def test_short_source_computes_with_short_warning_only(tmp_path, run_spy):
+    provider = FakeProvider(today=FIXED_NOW, history_years=3)
+    at, _ = ready_app(tmp_path, provider, years=5)
+    run_click(at)
+    warnings = tab_texts(at, "warning")
+    assert not any("no cubre" in text for text in warnings)
+    assert any("solo permite analizar" in text for text in warnings)
+    assert len(run_spy) == 1
+    assert at.session_state["bt_result"] is not None
+
+
+def test_run_shows_figures_table_metrics_and_notices(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    assert any(text.startswith("≈ ") and " fechas, ~" in text for text in tab_texts(at, "caption"))
+    run_click(at)
+    assert not at.exception
+
+    stored = at.session_state["bt_result"]
+    assert set(stored) >= {"key", "result"}
+    assert stored["result"].n > 0
+
+    charts = tab_charts(at)
+    assert len(charts) == 2
+    reliability = charts[0]["data"]
+    assert any(trace.get("x") == [0, 1] and trace.get("y") == [0, 1] for trace in reliability)
+    assert any("error_y" in trace for trace in reliability)
+
+    frames = backtest_tab(at).dataframe
+    assert len(frames[0].value) == 10
+    labels = [metric.label for metric in backtest_tab(at).metric]
+    assert {"Brier", "Casos (N)", "N efectivo"} <= set(labels)
+
+    texts = all_tab_texts(at)
+    for message in (
+        ui_backtest.MSG_BT_REALIZED_VOL,
+        ui_backtest.MSG_BT_AMERICAN,
+        ui_backtest.MSG_BT_Q,
+        ui_backtest.MSG_BT_WHAT,
+        ui_backtest.MSG_BT_OVERLAP,
+        ui_backtest.MSG_BT_TAILS,
+        MSG_NOT_ADVICE,
+    ):
+        assert message in texts, message
+    assert "no rentabilidad real" in ui_backtest.MSG_BT_WHAT
+    assert "colas gordas del modelo + ruido de volatilidad" in ui_backtest.MSG_BT_TAILS
+    assert not any(NAN_RE.search(text) for text in texts)
+    assert not backtest_tab(at).error
+
+
+def test_mu_line_adds_second_series(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    run_click(at)
+    plain = [t for t in tab_charts(at)[0]["data"] if "error_y" in t]
+    assert len(plain) == 1
+    set_param(at, "bt_use_mu", True)
+    run_click(at)
+    assert run_spy[-1]["with_mu"] is True
+    with_mu = [t for t in tab_charts(at)[0]["data"] if "error_y" in t]
+    assert len(with_mu) == 2
+
+
+def test_result_reused_while_params_unchanged(tmp_path, run_spy):
+    at, provider = ready_app(tmp_path, years=3)
+    run_click(at)
+    calls_before = len(provider.history_calls)
+    at.run()
+    at.run()
+    assert len(run_spy) == 1
+    assert len(provider.history_calls) == calls_before
+    assert len(tab_charts(at)) == 2
+
+
+def test_param_change_hides_old_result(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    run_click(at)
+    set_param(at, "bt_horizon", 45)
+    assert ui_backtest.MSG_BT_PARAMS_CHANGED in tab_texts(at, "info")
+    assert tab_charts(at) == []
+    assert not backtest_tab(at).metric
+
+
+def test_commission_change_invalidates_result(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    run_click(at)
+    at.number_input(key="per_contract_input").set_value(1.0).run()
+    assert ui_backtest.MSG_BT_PARAMS_CHANGED in tab_texts(at, "info")
+    # Sin comisiones, cambiar las de Ajustes no importa.
+    set_param(at, "bt_fees", False)
+    run_click(at)
+    at.number_input(key="per_contract_input").set_value(2.0).run()
+    assert ui_backtest.MSG_BT_PARAMS_CHANGED not in tab_texts(at, "info")
+
+
+def test_reloading_different_history_invalidates_result(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    run_click(at)
+    set_param(at, "bt_years", 5)
+    load_history_click(at)  # más años: otra descarga, otra huella
+    set_param(at, "bt_years", 3)
+    assert ui_backtest.MSG_BT_PARAMS_CHANGED in tab_texts(at, "info")
+
+
+def test_few_cases_marked_in_table(tmp_path, run_spy):
+    at, _ = ready_app(tmp_path, years=3)
+    run_click(at)
+    table = backtest_tab(at).dataframe[0].value
+    notes = list(table["Nota"])
+    rows = calibration_bins(
+        at.session_state["bt_result"]["result"].pop, at.session_state["bt_result"]["result"].win
+    )
+    assert notes.count("pocos casos") == sum(row.few for row in rows)
+    assert notes.count("sin casos") == sum(row.empty for row in rows)
+
+
+def test_reliability_figure_pure():
+    rows = calibration_bins([0.05, 0.55] + [0.75] * 12, [0, 1] + [1] * 9 + [0] * 3)
+    figure = ui_backtest.build_reliability_figure(rows)
+    data = figure.to_dict()["data"]
+    diagonal = [t for t in data if list(t["x"]) == [0, 1] and list(t["y"]) == [0, 1]]
+    assert len(diagonal) == 1
+    points = [t for t in data if t.get("error_y")]
+    assert len(points) == 1
+    # Tramos con pocos casos: marcador hueco.
+    symbols = list(points[0]["marker"]["symbol"])
+    assert symbols.count("circle-open") == 2
+    assert len(symbols) == 3
+
+
+def test_tails_figure_pure():
+    import numpy as np
+
+    z = np.random.default_rng(1).standard_normal(500)
+    figure = ui_backtest.build_tails_figure(z)
+    kinds = [trace["type"] for trace in figure.to_dict()["data"]]
+    assert kinds == ["histogram", "scatter"]

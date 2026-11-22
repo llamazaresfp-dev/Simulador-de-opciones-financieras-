@@ -29,3 +29,18 @@ def block_network(monkeypatch):
         return
     monkeypatch.setattr(socket.socket, "connect", _blocked)
     monkeypatch.setattr(socket, "getaddrinfo", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def redirect_strategies_dir(monkeypatch, tmp_path_factory):
+    """Etapa D (DD-6): ningún test toca la carpeta real `.estrategias/`.
+
+    La carpeta por defecto de estrategias.store se redirige a una ruta
+    temporal (que no se crea hasta que algo se guarda). store.py lee
+    este atributo en cada llamada, así que el cambio llega a todo:
+    también a los tests de la app que no inyectan su propia carpeta.
+    """
+    import estrategias.store
+
+    folder = tmp_path_factory.mktemp("estrategias") / ".estrategias"
+    monkeypatch.setattr(estrategias.store, "DEFAULT_STRATEGIES_DIR", folder)

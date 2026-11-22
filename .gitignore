@@ -12,6 +12,9 @@ AGENTS.md
 # Caché local de datos de mercado (Etapa C1)
 .cache_datos/
 
+# Estrategias guardadas (Etapa D)
+.estrategias/
+
 # --- Seguridad: nunca versionar secretos ni configuración local ---
 # Variables de entorno (claves de API, tokens); los .env.example sí se versionan
 .env

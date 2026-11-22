@@ -2,17 +2,17 @@
 name: etapa-d-comparar-guardar PLAN
 description: "Plan COMPLEX de la Etapa D (guardar/cargar estrategias con nombre y comparar 2 a 4 superpuestas) de Laboratorio de Opciones, en 7 bloques secuenciales cada uno cerrado con pytest verde. INNOVATE omitido."
 date: 22-11-26
-status: planned
+status: completed
 complexity: complex
-spec: process/general-plans/active/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_SPEC_22-11-26.md
+spec: process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_SPEC_22-11-26.md
 ---
 
 # Plan: Etapa D — Guardar estrategias y comparar 2 a 4 superpuestas
 
 **Date**: 22-11-26
 **Complexity**: COMPLEX (un solo plan, un solo flujo de ejecución, 7 bloques con dependencias; no es phase program)
-**Status**: ⏳ PLANNED (VALIDATE PASS ciclo 2 el 22-11-26, listo para EXECUTE; suplementos PVL S-1..S-5 aplicados; nada implementado)
-**SPEC bloqueado**: `process/general-plans/active/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_SPEC_22-11-26.md` (AC-D-1..AC-D-14, decisiones D-1..D-8, huecos D-G1..D-G9; el usuario ACEPTÓ el 22-11-26 los 9 valores propuestos: se tratan como bloqueados)
+**Status**: ✅ COMPLETED (EXECUTE bloques 1-7 y EVL en verde el 22-11-26; cierre UPDATE PROCESS COMPLETE_WITH_GAPS)
+**SPEC bloqueado**: `process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_SPEC_22-11-26.md` (AC-D-1..AC-D-14, decisiones D-1..D-8, huecos D-G1..D-G9; el usuario ACEPTÓ el 22-11-26 los 9 valores propuestos: se tratan como bloqueados)
 **Entorno**: Python 3.12.3, `.venv` (numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0); línea base: `.venv/bin/pytest -q` → **3029 passed, 4 skipped** (HEAD 9b586ba, rama main; el ejecutor la re-mide antes de tocar nada)
 
 **TL;DR:** un paquete nuevo de nivel superior `estrategias/` (sin Streamlit; puede importar `opciones`, el motor no lo importa) con tres piezas pequeñas: `serialize.py` (convierte estrategia ↔ JSON versionado y valida archivos ajenos sin lanzar nunca), `store.py` (una carpeta `.estrategias/`, un JSON por estrategia, nombre de archivo seguro, escritura atómica) y `compare.py` (malla común, prima neta, filas de la tabla). La interfaz son dos módulos raíz nuevos, `ui_estrategias.py` (pestaña "💾 Mis estrategias" + sección de guardado al final del Constructor) y `ui_comparar.py` (pestaña "⚖️ Comparar": curvas al vencimiento superpuestas con paleta apta para daltónicos + tabla), siguiendo el patrón de `ui_backtest.py` (dependencias recibidas como argumentos). `app.py` solo cambia `TAB_NAMES`, el desempaquetado de `main()`, `init_state`, una función de carpeta inyectable y los callbacks de "Abrir". Motor y `datos/` sin diff. Nada pesado corre sin clic o casilla. Cada bloque cierra con `.venv/bin/pytest -q` completo en verde.
@@ -113,7 +113,7 @@ A phase is NOT complete until:
 
 Status: ⏳ PLANNED · 🔨 CODE DONE · 🧪 TESTING · ✅ VERIFIED · 🚧 BLOCKED. Regla honesta: tests verdes sin revisión del usuario es `🔨 CODE DONE`, no `✅ VERIFIED`; solo el usuario pasa un bloque a `✅ VERIFIED`. Lección de MVP/A/B1/C1/C2: vc-execute-agent no puede escribir bajo `process/`; el estado del plan y el reporte los actualiza UPDATE PROCESS.
 
-Reporte (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/active/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_REPORT_<fecha>.md`.
+Reporte (lo crea EXECUTE/UPDATE PROCESS, no este plan): `process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_REPORT_<fecha>.md`.
 
 ## Acceptance Criteria
 
@@ -352,7 +352,7 @@ Orden indicado en la tabla de estado; cada bloque termina con su gate y `.venv/b
 
 ## Resume and Execution Handoff
 
-1. **Plan seleccionado:** `process/general-plans/active/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_PLAN_22-11-26.md` (SPEC al lado, mismo folder).
+1. **Plan seleccionado:** `process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/etapa-d-comparar-guardar_PLAN_22-11-26.md` (SPEC al lado, mismo folder).
 2. **Último paso completado:** PLAN escrito (INNOVATE omitido, ver arriba) y **suplemento PVL S-1..S-4 aplicado el 22-11-26** (claves `*_input` en callbacks, cotas de magnitud + `try/except`, test de aislamiento con `ast`, curvas «hoy» en malla propia: DD-20..DD-23, R14-R15); ningún bloque ejecutado; línea base esperada 3029 passed + 4 skipped (re-medir al empezar).
 3. **Validate-contract:** `Gate: PASS` en el ciclo 2 (22-11-26; S-1..S-5 cerrados); listo para EXECUTE.
 4. **Contexto de apoyo cargado:** `process/context/all-context.md`, `process/context/tests/all-tests.md`, el SPEC, el plan de C2 (plantilla), `CLAUDE.md`, y el código real de `app.py`, `ui_backtest.py`, `datos/cache.py`, `opciones/*`, `tests/test_app_smoke.py`, `tests/test_app_backtest.py`, `tests/test_datos_isolation.py`, `tests/conftest.py`, `.gitignore`.

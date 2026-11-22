@@ -1,6 +1,6 @@
 # laboratorio-opciones - All Context
 
-Last updated: 2026-11-22 (UPDATE PROCESS, Stage C2 closeout)
+Last updated: 2026-11-22 (UPDATE PROCESS, Stage D closeout)
 
 This file is the root context entrypoint for the repo.
 
@@ -145,13 +145,13 @@ When durable project knowledge changes:
 
 ## Repository Structure
 
-MVP (v1), Stage A (Monte Carlo + implied volatility), Stage B1 (binomial American model), Stage C1 (live market data) and Stage C2 (historical data + PoP calibration backtest) implemented. Layout:
+MVP (v1), Stage A (Monte Carlo + implied volatility), Stage B1 (binomial American model), Stage C1 (live market data), Stage C2 (historical data + PoP calibration backtest) and Stage D (compare + save strategies) implemented. Layout:
 
 ```
 laboratorio-opciones/
   DISENO.md            -- design doc (Spanish): vision, MVP scope, decisions + rationale, roadmap
   requirements.txt     -- pinned dependencies (numpy, scipy, plotly, streamlit, pytest, yfinance 1.8.0, pandas 3.1.1)
-  app.py               -- Streamlit web app (UI only, calls opciones/); 4 tabs: 📊 Catálogo / 🛠️ Constructor / ⚙️ Ajustes / 📈 Backtest (Stage C2);
+  app.py               -- Streamlit web app (UI only, calls opciones/); 6 tabs (Stage D): 📊 Catálogo / 🛠️ Constructor / ⚖️ Comparar / 💾 Mis estrategias / ⚙️ Ajustes / 📈 Backtest;
                           user's visual redesign (22-11-26): emoji tab labels, catalog cards with coloured badges, ➕/➖/🔄 icons,
                           subheaders with divider, COLOR_SYSTEM/COLOR_STRATEGY/ICON_* constants (legs stay dicts, not Leg objects);
                           "Escenarios (Monte Carlo)" expander under the metrics, per-leg IV button, Ajustes "Simulación";
@@ -177,6 +177,15 @@ laboratorio-opciones/
     calibration.py     -- Stage C2: pure numpy; decile binning, Wilson intervals, Brier, kurtosis/tails histogram helpers
     backtest.py        -- Stage C2: pure numpy, helpers on integer day numbers (first_analyzed_index -> (index, years_available, warning),
                           expiry_index -> None if no session in (t, t+H]) and run_backtest(template object, ...); forces Black-Scholes
+  estrategias/         -- Stage D save/load (top-level package, stdlib only, no Streamlit; may import `opciones`, the engine does not import it)
+    serialize.py       -- strategy_to_dict / prepare_document / parse_strategy_json; schema_version 1; 256 KB cap; magnitude BOUNDS
+                          (spot/strike [0.01, 1e7], quantity [1e-6, 1e5], price/bid/ask [0, 1e6], vol [MIN_VOL, 5], days [0, 3650],
+                          rate/q [-0.5, 1], commissions [0, 1e3]); never raises, Spanish messages
+    store.py           -- `.estrategias/` folder (git-ignored), one JSON per strategy, safe slugs (-2/-3 suffix), atomic write, 100-file cap,
+                          skips symlinks/FIFOs, reads DEFAULT_STRATEGIES_DIR at call time (injectable)
+    compare.py         -- common expiry grid, "hoy" on each strategy's own grid, net premium, table rows (PoP "—" at days 0), try/except per entry
+  ui_estrategias.py    -- Stage D: 💾 Mis estrategias tab + save section at the end of the Constructor (save, overwrite, download, upload)
+  ui_comparar.py       -- Stage D: ⚖️ Comparar tab (superimposed curves, colour-blind-safe palette, table; "hoy"/Greeks behind a checkbox)
   ui_backtest.py       -- Stage C2 Backtest tab (root, Streamlit): controls, "Cargar histórico", "Calcular", reliability chart, table, tails;
                           init_backtest_state(), build_tails_figure(z); no I/O or compute without button clicks
   datos/               -- Stage C1 live market data (top-level package, outside the engine; engine unchanged)
@@ -195,7 +204,7 @@ laboratorio-opciones/
     history_service.py -- Stage C2: clean_history (drops today's row, NaN, negatives, duplicates; dividends dated today or later), load with
                           years+1 warm-up, cache fallback offline, provider passed as a callable
     tickers.py         -- curated list: SPX->^SPX; SPY, QQQ, IWM; AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA; "Entrada manual"
-  tests/               -- pytest suite (34 modules incl. conftest.py, __init__.py, synthetic.py; 3029 passed + 4 skipped; Stage C2 adds test_calibration, test_backtest_helpers, test_backtest, synthetic.py, test_datos_history_types/cache/service, test_datos_yahoo_history, test_app_backtest; Stage C1 adds test_datos_types/filters/cache/service/yahoo/isolation/live/tickers/chain_picker, tests/fixtures/, extended app smoke): test_pricing, test_legs_payoff,
+  tests/               -- pytest suite (40 modules incl. conftest.py, __init__.py, synthetic.py; 3397 passed + 4 skipped; Stage D adds test_estrategias_serialize/store/compare/isolation, test_app_estrategias, test_app_comparar; Stage C2 adds test_calibration, test_backtest_helpers, test_backtest, synthetic.py, test_datos_history_types/cache/service, test_datos_yahoo_history, test_app_backtest; Stage C1 adds test_datos_types/filters/cache/service/yahoo/isolation/live/tickers/chain_picker, tests/fixtures/, extended app smoke): test_pricing, test_legs_payoff,
                           test_commissions, test_metrics, test_validation, test_analyze, test_catalog,
                           test_implied_vol, test_simulation, test_binomial, test_binomial_iv, test_pricing_model, test_app_smoke (AppTest)
   process/             -- RIPER-5 harness: context, plans, development protocols
@@ -253,6 +262,17 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Lessons:** AppTest runs every tab body, so tabs must do no I/O or compute without clicks; pass the provider as a callable (`data_provider()` builds YahooProvider and swallows exceptions; use a recording spy in tests); `.cache_datos` is git-ignored, so detect test leaks with a sha256 of `find .cache_datos -type f -printf '%p %s %T@\n' | sort` and re-baseline per session (the user's Streamlit servers write there); AI-assisted UI edits can silently refactor state, so run the full suite after visual changes.
 - **Known gaps:** live Yahoo history (^GSPC/^SPX, ^IRX, max history) only checked by the user's manual run (opt-in live test not in suite); no historical implied vol (realised vol proxy mixes model error and volatility risk premium; VIX comparison deferred); overlapping windows make effective N approximate, and weekday-only `is_fresh` may refetch once after a market holiday. Full text: `process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/`.
 
+## Stage D Behaviours Worth Knowing
+
+- **What it is:** save/load named strategies (local folder `.estrategias/` and/or JSON download/upload) and compare 2 to 4 strategies (the Constructor one + up to 3 saved) with one common market (the sidebar one): overlaid expiry P&L curves and a side-by-side table. Study tool, not advice. User accepted all 9 SPEC values (22-11-26).
+- **Opening:** "Abrir con su mercado" restores legs, market, model and commissions; "Abrir solo las patas" keeps the current market and commissions. Manual legs intact, automatic premiums recalculated, market legs become manual with the saved premium plus a dated notice; loaded ticker/snapshot/expiry are cleared. `open_saved_strategy(slug, with_market)` in `app.py`.
+- **Untrusted files:** all external JSON goes through `parse_strategy_json` (size cap, schema version, types, enums, max 10 legs, name 1-60 chars, magnitude BOUNDS incl. positive floors, then engine validators); no eval/pickle. Traversal-like names are accepted as plain text and slugified inside the folder; NUL/over-long/blank names rejected. Corrupt files in the folder are skipped with a notice.
+- **Comparison:** common expiry grid = union of each strategy's grid; each curve equals its individual expiry P&L; "hoy" curves are computed on each strategy's own grid (union grid cost 6.98 s); max 4 (5th rejected); saved strategies are revalued with the current market with a warning if the saved market differs; stale selection cleared on delete. Timing: compare without heavy 0.045 s; heavy (hoy + Greeks) 4 iron condors cold 1.2-1.5 s. Nothing heavy runs without a click or checkbox.
+- **State pattern:** when a callback restores state, write both the simple key and the widget key (`*_input`); widget values are written to `session_state` before creation (no `value=`); callback messages via `sv_message`; widget keys derive from the safe slug; selector texts do not read state or clock.
+- **Tests:** `tests/conftest.py` autouse fixture redirects `estrategias.store.DEFAULT_STRATEGIES_DIR` to a temp folder; AppTest 1.67 supports `file_uploader` and `download_button` (real tests exist). Long call worst P&L is -251.30 (close fee just above the strike). Full text: `process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/`.
+- **Lessons:** engine validators only check finiteness, so file inputs need magnitude bounds including positive floors (spot 1e-300 crashed `analyze`); read module-level default folders at call time so tests can redirect them; restoring state needs simple + widget keys.
+- **Known gaps:** (1) sidebar number_inputs have no min/max, so a hand-typed absurd spot (1e-300) can still crash the Constructor (MVP behaviour, not file-related); (2) `.estrategias/` is per-machine local storage, unsuitable for a shared deployment (JSON download/upload covers portability).
+
 ## Technology Stack
 
 - **Language:** Python 3.12.3 (system interpreter, `/usr/bin/python3`)
@@ -284,7 +304,9 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 
 ## Environment and Configuration
 
-**Config files:** `requirements.txt` (pinned dependencies), `.gitignore` (includes `.cache_datos/`). No secrets. Env var `LIVE_DATA=1` enables the opt-in live test and lifts the test network block.
+**Config files:** `requirements.txt` (pinned dependencies), `.gitignore` (includes `.cache_datos/` and `.estrategias/`). No secrets. Env var `LIVE_DATA=1` enables the opt-in live test and lifts the test network block.
+
+**Saved strategies (Stage D):** local `.estrategias/` folder (git-ignored, one JSON per strategy, per machine); tests redirect it to a temp folder and never touch the real one.
 
 **Live data (C1):** yfinance needs no API key. Local cache in `.cache_datos/` (git-ignored). Index options (SPX as `^SPX`) may be empty/all-bid-0 when the market is closed; SPY/QQQ/IWM are the ETF equivalents.
 
@@ -296,6 +318,7 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - `app.py` -- Streamlit UI
 - `datos/` -- live market data package (Stage C1) and historical data (Stage C2)
 - `ui_backtest.py` -- Backtest tab (Stage C2)
+- `estrategias/`, `ui_estrategias.py`, `ui_comparar.py` -- save/load and compare (Stage D)
 
 ## Open Questions / Outstanding Work
 
@@ -305,11 +328,12 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - Stage B2 (rational close fee at expiry) deferred by the user; backlog item stays: `process/general-plans/backlog/close-fee-rational-close_20-11-26.md` (accepted decisions: abandon if value <= fee, short legs unchanged, toggle in Ajustes default on).
 - Stage C1 (live market data) complete and verified (`process/general-plans/completed/etapa-c1-datos-directo_20-11-26/`; AC-C1-1..AC-C1-16 met, 2742 passed + 3 skipped; closeout COMPLETE_WITH_GAPS, 3 known gaps, see Stage C1 behaviours).
 - Stage C2 (historical underlying data + PoP calibration backtest) complete and verified (`process/general-plans/completed/etapa-c2-historico-backtest_21-11-26/`; AC-C2-1..AC-C2-17 met, 3029 passed + 4 skipped; closeout COMPLETE_WITH_GAPS, 3 known gaps; user manual checklist of 8 items OK 22-11-26).
-- Next: Stage B2 (rational close fee, backlog) and optional Stage C3 (paid historical options); possible future work: VIX comparison, strategy replay.
+- Stage D (compare + save strategies) complete and verified (`process/general-plans/completed/etapa-d-comparar-guardar_22-11-26/`; AC-D-1..AC-D-14 met, 3397 passed + 4 skipped; closeout COMPLETE_WITH_GAPS, 2 known gaps; user manual checklist of 8 items OK 22-11-26).
+- Next: Stage B2 (rational close fee, backlog) and optional Stage C3 (paid historical options); possible future work: VIX comparison, strategy replay, DISENO v4 assistant (strategy suggestions).
 - Default commission values are indicative; adjust to the user's real broker when known.
 
 ## Scan Metadata
 
-- Generated: 2026-11-20; refreshed at Stage C2 closeout (Repo HEAD 4a21c2c at scan time, commit of closeout follows)
+- Generated: 2026-11-20; refreshed at Stage D closeout (Repo HEAD bc12d4c at scan time, commit of closeout follows)
 - Mode: UPDATE PROCESS refresh
 - Package manager: pip + venv (requirements.txt)

@@ -262,7 +262,7 @@ Run the app: `.venv/bin/streamlit run app.py`. Engine entry point: `opciones.ana
 - **Market data (Stage C1):** yfinance 1.8.0 + pandas 3.1.1 (free, ~15 min delayed; stocks, ETFs and index options), used only inside `datos/yahoo.py`
 - **Tests:** pytest
 - **Environment:** local virtualenv `.venv/` (git-ignored), created 2026-11-20. Installed: numpy 2.5.5, scipy 1.18.1, plotly 7.1.0, streamlit 1.67.0, pytest 9.2.0, yfinance 1.8.0, pandas 3.1.1. Note: `pip install` needs network access outside the sandbox.
-- **Version control:** git, single local branch `main`, no remote.
+- **Version control:** git, branch `main`, remote `origin` on GitHub (llamazaresfp-dev/Simulador-de-opciones-financieras-); commits use the GitHub noreply email.
 
 ## Key Patterns and Conventions
 

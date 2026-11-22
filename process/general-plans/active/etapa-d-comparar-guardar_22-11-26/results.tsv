@@ -1,0 +1,6 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-22	4	0	4	0	ACTIVE	baseline	outer PVL first pass: Gate CONDITIONAL (S-1 stale *_input widget keys, S-2 hostile magnitudes crash engine, S-3 isolation test text search, S-4 hoy curves on union grid 6.98 s)
+1	2026-11-22	4	0	4	4	ACTIVE	CONTINUE	supplement applied S-1..S-4; re-run PVL from V1
+2	2026-11-22	1	0	1	0	ACTIVE	CONTINUE	re-validation cycle 1: Gate CONDITIONAL (S-5 positive floor in BOUNDS: spot 1e-300 crashes analyze)
+3	2026-11-22	1	0	1	1	ACTIVE	CONTINUE	supplement applied S-5 (positive floors) + cosmetic notes; re-run PVL from V1
+4	2026-11-22	0	0	0	0	SATURATED	HALTED_SUCCESS	re-validation cycle 2: Gate PASS (sweeps at new floors clean)
